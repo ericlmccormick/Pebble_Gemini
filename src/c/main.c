@@ -53,7 +53,8 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static uint32_t s_head = 0;                   
   static uint32_t s_tail = 0;                   
   static uint32_t s_buffer_count = 0;           
-  static AppTimer *s_playback_timer = NULL;     
+  static AppTimer *s_playback_timer = NULL;
+  static AppTimer *s_start_retry_timer = NULL;     
   static AppTimer *s_stream_close_timer = NULL; 
   static bool s_speaker_open = false;           
   static bool s_ignore_audio = false;
@@ -212,6 +213,12 @@ static void update_text_layout() {
 
   static void playback_timer_callback(void *data);
   static void start_playback(void);
+  static void maybe_start_playback(void);
+  static void start_retry_callback(void *data) {
+    s_start_retry_timer = NULL;
+    maybe_start_playback();
+  }
+
 
   // Stop-and-wait protocol: ACK only after data has entered the ring.
   // A retry with an old sequence gets the same ACK but is never enqueued twice.
@@ -290,7 +297,8 @@ static void update_text_layout() {
     if (!s_speaker_open) {                      
       bool success = speaker_stream_open(SpeakerPcmFormat_8kHz_16bit, 100);
       if (!success) {
-        APP_LOG(APP_LOG_LEVEL_ERROR, "Speaker failed to open"); 
+        // Speaker may still be draining the previous sentence.
+        if (!s_start_retry_timer) s_start_retry_timer = app_timer_register(120, start_retry_callback, NULL);
         return;
       }
       s_speaker_open = true;                    
@@ -348,6 +356,10 @@ static void update_text_layout() {
   }
 
   static void stop_audio() {
+    if (s_start_retry_timer) {
+      app_timer_cancel(s_start_retry_timer);
+      s_start_retry_timer = NULL;
+    }
     if (s_speaker_open) {
       speaker_stream_close();                   
       s_speaker_open = false;                   
