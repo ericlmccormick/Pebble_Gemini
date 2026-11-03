@@ -12,7 +12,9 @@
   #define PLAYBACK_ADPCM_BYTES 800         
   #define PLAYBACK_PCM_SAMPLES (PLAYBACK_ADPCM_BYTES * 2) 
   #define PLAYBACK_INTERVAL_MS 200         
-  #define START_BUFFER_THRESHOLD 3000      
+  #define START_BUFFER_THRESHOLD 2400  // 0.6 seconds of ADPCM at 8 kHz
+  #define MAX_START_BUFFER 12000    // Leave room for incoming packets
+  #define SPEAKER_BYTES_PER_SECOND 4000      
   #define STREAM_CLOSE_DELAY_MS 1500       
 #endif
 
@@ -55,7 +57,13 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static AppTimer *s_stream_close_timer = NULL; 
   static bool s_speaker_open = false;           
   static bool s_ignore_audio = false;
-  static bool s_sentence_ended = false;           
+  static bool s_sentence_ended = false;
+  static uint32_t s_stream_id = 0;
+  static int32_t s_expected_seq = 0;
+  static uint32_t s_sentence_total = 0;
+  static uint32_t s_sentence_received = 0;
+  static uint32_t s_start_threshold = START_BUFFER_THRESHOLD;
+  static bool s_waiting_for_audio = true;           
 
   static const int16_t stepTable[89] = {
     7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,
@@ -199,7 +207,45 @@ static void update_text_layout() {
     s_volume_timer = app_timer_register(2000, hide_volume_layer_callback, NULL); 
   }
 
-  static void playback_timer_callback(void *data); 
+  static void playback_timer_callback(void *data);
+  static void start_playback(void);
+
+  // Stop-and-wait protocol: ACK only after data has entered the ring.
+  // A retry with an old sequence gets the same ACK but is never enqueued twice.
+  static void send_audio_reply(const char *command, int32_t sequence) {
+    DictionaryIterator *out = NULL;
+    if (app_message_outbox_begin(&out) != APP_MSG_OK || !out) return;
+    dict_write_cstring(out, MESSAGE_KEY_COMMAND, command);
+    dict_write_int32(out, MESSAGE_KEY_STREAM_ID, (int32_t)s_stream_id);
+    dict_write_int32(out, MESSAGE_KEY_SEQ, sequence);
+    dict_write_int32(out, MESSAGE_KEY_BUFFER_FREE, (int32_t)(RING_BUFFER_SIZE - s_buffer_count));
+    app_message_outbox_send();
+  }
+
+  static uint32_t choose_start_threshold(uint32_t total, uint32_t link_rate) {
+    if (total > 0 && total <= 4800) return total; // Entire short sentence first.
+    // Adaptive estimate: audio drains at 4 KB/s. A slower link requires
+    // a larger safety reservoir to finish longer sentences.
+    uint32_t target = START_BUFFER_THRESHOLD;
+    if (link_rate < 4800) {
+      uint32_t shortfall = link_rate >= SPEAKER_BYTES_PER_SECOND ? 0 :
+        (uint32_t)(((uint64_t)total * (SPEAKER_BYTES_PER_SECOND - link_rate)) / SPEAKER_BYTES_PER_SECOND);
+      target = 4000 + shortfall;
+    } else if (link_rate < 6000) {
+      target = 3600;
+    }
+    if (target > MAX_START_BUFFER) target = MAX_START_BUFFER;
+    if (total > 0 && target > total) target = total;
+    return target;
+  }
+
+  static void maybe_start_playback() {
+    if (s_ignore_audio || s_speaker_open) return;
+    if (s_buffer_count >= s_start_threshold || (s_sentence_ended && s_buffer_count > 0)) {
+      start_playback();
+    }
+  }
+ 
   static void delayed_close_callback(void *data);  
 
   static void cancel_close_timer() {
@@ -253,7 +299,7 @@ static void update_text_layout() {
   }
 
   static void playback_timer_callback(void *data) {
-    s_playback_timer = NULL;                    
+    s_playback_timer = NULL;
     if (!s_speaker_open) return;                
 
     static int16_t s_out_buf[PLAYBACK_PCM_SAMPLES]; 
@@ -279,9 +325,20 @@ static void update_text_layout() {
       speaker_stream_write((uint8_t*)s_out_buf, sizeof(s_out_buf));
       if (s_buffer_count == 0) s_sentence_ended = false;
     } else {
-      memset(s_out_buf, 0, sizeof(s_out_buf));
-      speaker_stream_write((uint8_t*)s_out_buf, sizeof(s_out_buf)); 
-      schedule_close_timer();                   
+      // Do not endlessly write silence when BLE falls behind playback.
+      // Pause and refill instead; the predictor is preserved across pauses.
+      if (!s_sentence_ended) {
+        speaker_stream_close();
+        s_speaker_open = false;
+        s_waiting_for_audio = true;
+        s_start_threshold = 4000; // 1 second reserve after an underrun.
+        set_status("Rebuffering audio...");
+        return;
+      }
+      speaker_stream_close();
+      s_speaker_open = false;
+      s_waiting_for_audio = true;
+      return;
     }
     s_playback_timer = app_timer_register(PLAYBACK_INTERVAL_MS, playback_timer_callback, NULL);
   }
@@ -301,6 +358,10 @@ static void update_text_layout() {
     s_tail = 0;                                 
     reset_adpcm_state();
     s_sentence_ended = false;
+    s_sentence_total = 0;
+    s_sentence_received = 0;
+    s_start_threshold = START_BUFFER_THRESHOLD;
+    s_waiting_for_audio = true;
     set_status(NULL);                           
   }
 
@@ -328,10 +389,16 @@ static void update_text_layout() {
 static void select_short_click_handler(ClickRecognizerRef recognizer, void *context) {
   #ifdef PBL_SPEAKER
   if (s_speaker_open || s_buffer_count > 0 || !s_ignore_audio) {
-    s_ignore_audio = true;                      
+    s_ignore_audio = true;
     stop_audio();                               
   }
   #endif
+  // Invalidate any phone-side transfer as soon as the user starts a new query.
+  DictionaryIterator *cancel_iter = NULL;
+  if (app_message_outbox_begin(&cancel_iter) == APP_MSG_OK && cancel_iter) {
+    dict_write_cstring(cancel_iter, MESSAGE_KEY_COMMAND, "AUDIO_CANCEL");
+    app_message_outbox_send();
+  }
   dictation_session_start(s_dictation_session); 
 }
 
@@ -447,7 +514,15 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
           set_status(NULL);                     // Immediately clear status strip if no audio is expected (text-only mode)
         } else {
           s_ignore_audio = false;               
-          reset_adpcm_state();                  
+          reset_adpcm_state();
+          s_sentence_ended = false;
+          s_sentence_received = 0;
+          s_sentence_total = 0;
+          s_expected_seq = 0;
+          s_start_threshold = START_BUFFER_THRESHOLD;
+          s_waiting_for_audio = true;
+          Tuple *stream_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
+          if (stream_tuple) s_stream_id = (uint32_t)stream_tuple->value->int32;
           if (s_volume > 0.01f) {
             set_status("Buffering Audio...");   
           } else {
@@ -461,22 +536,57 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   } 
   
   #ifdef PBL_SPEAKER
-  else if (strcmp(command_tuple->value->cstring, "AUDIO_CHUNK") == 0) { 
-    if (s_ignore_audio) return;                 
-    Tuple *chunk_tuple = dict_find(iterator, MESSAGE_KEY_CHUNK); 
-    if (chunk_tuple) {
-      s_sentence_ended = false;
-      if (s_buffer_count + chunk_tuple->length > RING_BUFFER_SIZE) {
-        APP_LOG(APP_LOG_LEVEL_WARNING, "Audio ring buffer full; incoming chunk may be lost");
-      }
-      push_to_ring_buffer(chunk_tuple->value->data, chunk_tuple->length); 
-      if (!s_speaker_open && s_buffer_count >= START_BUFFER_THRESHOLD) start_playback();
+  else if (strcmp(command_tuple->value->cstring, "AUDIO_CHUNK") == 0 ||
+           strcmp(command_tuple->value->cstring, "AUDIO_SENTENCE_END") == 0) {
+    Tuple *id_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
+    Tuple *seq_tuple = dict_find(iterator, MESSAGE_KEY_SEQ);
+    if (!id_tuple || !seq_tuple || (uint32_t)id_tuple->value->int32 != s_stream_id || s_ignore_audio) return;
+    int32_t sequence = seq_tuple->value->int32;
+    if (sequence < s_expected_seq) {
+      send_audio_reply("AUDIO_ACK", sequence); // Lost ACK: do not double insert.
+      return;
     }
-  } else if (strcmp(command_tuple->value->cstring, "AUDIO_SENTENCE_END") == 0) { 
-    if (s_ignore_audio) return;
-    s_sentence_ended = true;
-    if (!s_speaker_open && s_buffer_count > 0) start_playback(); 
-  } 
+    if (sequence != s_expected_seq) {
+      send_audio_reply("AUDIO_WAIT", sequence);
+      return;
+    }
+
+    if (strcmp(command_tuple->value->cstring, "AUDIO_CHUNK") == 0) {
+      Tuple *chunk_tuple = dict_find(iterator, MESSAGE_KEY_CHUNK);
+      if (!chunk_tuple || !chunk_tuple->length) return;
+      if (chunk_tuple->length > RING_BUFFER_SIZE - s_buffer_count) {
+        send_audio_reply("AUDIO_WAIT", sequence);
+        return;
+      }
+      Tuple *total_tuple = dict_find(iterator, MESSAGE_KEY_SENTENCE_TOTAL);
+      Tuple *hint_tuple = dict_find(iterator, MESSAGE_KEY_BUFFER_HINT);
+      if (s_sentence_received == 0 && total_tuple) {
+        s_sentence_total = (uint32_t)total_tuple->value->int32;
+        uint32_t link_rate = hint_tuple ? (uint32_t)hint_tuple->value->int32 : 5200;
+        s_start_threshold = choose_start_threshold(s_sentence_total, link_rate);
+      }
+      s_sentence_ended = false;
+      push_to_ring_buffer(chunk_tuple->value->data, chunk_tuple->length);
+      s_sentence_received += chunk_tuple->length;
+      s_expected_seq++;
+      send_audio_reply("AUDIO_ACK", sequence);
+      maybe_start_playback();
+    } else {
+      s_sentence_ended = true;
+      s_sentence_total = 0;
+      s_sentence_received = 0;
+      s_expected_seq++;
+      send_audio_reply("AUDIO_ACK", sequence);
+      maybe_start_playback();
+    }
+  } else if (strcmp(command_tuple->value->cstring, "AUDIO_ERROR") == 0) {
+    Tuple *id_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
+    if (id_tuple && (uint32_t)id_tuple->value->int32 == s_stream_id) {
+      s_ignore_audio = true;
+      stop_audio();
+      set_status("Audio unavailable");
+    }
+  }
   #endif
   
   else if (strcmp(command_tuple->value->cstring, "UPDATE_FONT") == 0) { 
