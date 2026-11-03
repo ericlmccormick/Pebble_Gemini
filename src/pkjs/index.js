@@ -93,19 +93,20 @@ try {
 // SECTION 4: ECOSYSTEM PLATFORM DETECTION
 // =========================================================================
 
-var watchInfo = null;       
-var hasSpeaker = false;     
+// Only enable voice for speaker hardware supported by this build.
+// gabbro (Pebble Round 2) has no speaker; unknown platforms use text-only.
+// Flint can be enabled separately when it is added to targetPlatforms and
+// native speaker playback is validated on that device.
+function platformHasSpeaker(platform) {
+  return platform === 'emery';
+}
+var watchInfo = null;
+var hasSpeaker = false;
 try {
-  watchInfo = Pebble.getActiveWatchInfo(); 
-  if (watchInfo && watchInfo.platform) {  
-    if (watchInfo.platform === 'emery' || watchInfo.platform === 'gabbro') {
-      hasSpeaker = true;    
-    }
-  } else {
-    hasSpeaker = false; // Unknown watch: favor reliable text-only behavior.
-  }
+  watchInfo = Pebble.getActiveWatchInfo();
+  hasSpeaker = !!(watchInfo && platformHasSpeaker(watchInfo.platform));
 } catch (err) {
-  hasSpeaker = false;        
+  hasSpeaker = false;
 }
 
 // =========================================================================
