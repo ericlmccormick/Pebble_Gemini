@@ -16,7 +16,7 @@ var customPersona = localStorage.getItem("CUSTOM_PERSONA") || "";
 // Restore dynamic dropdown configurations with updated default
 var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.5-flash"; 
 var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Journey-F";        
-var audioProfile = localStorage.getItem("AUDIO_PROFILE") || "8k-16b";          
+var audioProfile = "8k-16b"; // Hardware output is 8-kHz PCM16, transmitted as 4-bit IMA ADPCM.          
 
 // LOGIC: Evaluate the user's TTS preference based on history
 var storedToggle = localStorage.getItem("ENABLE_TTS");
@@ -72,7 +72,13 @@ var readyAudioQueue = [];
 var isFetchingTTS = false; 
 var isSendingBLE = false;
 var requestGeneration = 0;
-var MAX_BLE_RETRIES = 4;  
+var MAX_BLE_RETRIES = 5;
+var nextStreamId = (Date.now() & 0x7fffffff) || 1;
+var activeTransfer = null;
+var AUDIO_PACKET_BYTES = 360; // Leaves room for command/session/sequence tuples.
+var ACK_TIMEOUT_MS = 1800;
+var rateBytesPerSecond = 5200; // Conservative initial link estimate.
+var lastAckTime = 0;  
 
 var js_adpcm_valpred = 0;  
 var js_adpcm_index = 0;    
@@ -190,18 +196,10 @@ if (hasSpeaker) {
   });
 
   advancedSettingsItems.push({
-    "type": "select", 
-    "messageKey": "AUDIO_PROFILE",
-    "label": "Audio Stream Quality",
-    "defaultValue": audioProfile,
-    "description": "Note: 8kHz/16-bit is optimized for Pebble BLE bandwidth. Lowering the rate further to 8-bit will reduce delay but increase background noise.",
-    "options": [
-      { "label": "16kHz 16-bit (High Fidelity)", "value": "16k-16b" },
-      { "label": "16kHz 8-bit", "value": "16k-8b" },
-      { "label": "8kHz 16-bit (Best Stability/Default)", "value": "8k-16b" },
-      { "label": "8kHz 8-bit (Lowest Delay)", "value": "8k-8b" }
-    ]
+    "type": "text",
+    "defaultValue": "Audio: 8 kHz PCM16 playback with 4-bit IMA-ADPCM streaming. The previous 16 kHz / 8-bit modes were not supported by the watch decoder."
   });
+
 }
 
 var clayConfig = [
@@ -264,18 +262,18 @@ function customClay() {
     var ttsToggle = clayConfig.getItemByMessageKey('ENABLE_TTS');
     var ttsKey = clayConfig.getItemByMessageKey('TTS_API_KEY');
     var ttsVoice = clayConfig.getItemByMessageKey('TTS_VOICE');
-    var audioProfile = clayConfig.getItemByMessageKey('AUDIO_PROFILE');
+
 
     // Only process visibility if the components exist on this hardware profile
     if (ttsToggle) {
       if (ttsToggle.get()) {
         if (ttsKey) ttsKey.show();
         if (ttsVoice) ttsVoice.show();
-        if (audioProfile) audioProfile.show();
+
       } else {
         if (ttsKey) ttsKey.hide(); // Hides the fields, but preserves their saved text!
         if (ttsVoice) ttsVoice.hide();
-        if (audioProfile) audioProfile.hide();
+
       }
     }
   }
@@ -397,10 +395,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem("TTS_VOICE", ttsVoice); 
   }
 
-  if (settings.AUDIO_PROFILE) {
-    audioProfile = settings.AUDIO_PROFILE.value || "8k-16b";
-    localStorage.setItem("AUDIO_PROFILE", audioProfile); 
-  }
+
 
   if (settings.FONT_SIZE) {
     fontSize = settings.FONT_SIZE.value;
@@ -417,6 +412,15 @@ Pebble.addEventListener('ready', function() {
 
 Pebble.addEventListener('appmessage', function(e) {
   var dict = e.payload; 
+
+  if (dict.COMMAND === 'AUDIO_ACK' || dict.COMMAND === 'AUDIO_WAIT') {
+    handleAudioAck(dict);
+    return;
+  }
+  if (dict.COMMAND === 'AUDIO_CANCEL') {
+    cancelCurrentAudio();
+    return;
+  }
 
   if (dict.COMMAND === 'DICTATION') {
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
@@ -455,7 +459,9 @@ function sendErrorToWatch(msg) {
 // =========================================================================
 
 function fetchGeminiResponse(prompt, skipAudio) {
-  var generation = ++requestGeneration;
+  cancelCurrentAudio();
+  var generation = requestGeneration;
+  var streamId = nextStreamId = ((nextStreamId + 1) & 0x7fffffff) || 1;
   sentenceQueue = [];
   readyAudioQueue = [];
   isFetchingTTS = false;
@@ -476,7 +482,8 @@ function fetchGeminiResponse(prompt, skipAudio) {
     conversationHistory = conversationHistory.slice(excess);
   }
 
-  conversationHistory.push({ role: "user", parts: [{ text: prompt }] }); 
+  var historyForRequest = conversationHistory.slice();
+  historyForRequest.push({ role: "user", parts: [{ text: prompt }] }); 
 
   // DYNAMIC URL ROUTING
   var url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
@@ -486,7 +493,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: systemText }] },
-      contents: conversationHistory 
+      contents: historyForRequest 
     })
   })
   .then(function(response) {
@@ -497,17 +504,11 @@ function fetchGeminiResponse(prompt, skipAudio) {
     if (data.candidates && data.candidates.length > 0) {
       var replyText = data.candidates[0].content.parts[0].text; 
       
+      conversationHistory = historyForRequest;
       conversationHistory.push({ role: "model", parts: [{ text: replyText }] }); 
       localStorage.setItem("CHAT_HISTORY", JSON.stringify(conversationHistory));  
 
-      // Multiplex the command so the watch handles audio stream profiles dynamically
-      var cmd = 'TEXT_RESPONSE_NO_AUDIO';
-      if (!skipAudio) {
-        cmd = 'TEXT_RESPONSE_16_16';
-        if (audioProfile === "16k-8b") cmd = 'TEXT_RESPONSE_16_8';
-        else if (audioProfile === "8k-16b") cmd = 'TEXT_RESPONSE_8_16';
-        else if (audioProfile === "8k-8b") cmd = 'TEXT_RESPONSE_8_8';
-      }
+      var cmd = skipAudio ? 'TEXT_RESPONSE_NO_AUDIO' : 'TEXT_RESPONSE_8_16';
 
       // UTF-8-aware limit: watch inbox is only 1024 bytes including tuple overhead.
       var displayText = '', bytes = 0;
@@ -520,20 +521,22 @@ function fetchGeminiResponse(prompt, skipAudio) {
         if (bytes + size > 700) break;
         displayText += replyText.charAt(i); bytes += size;
       }
-      Pebble.sendAppMessage({ 'COMMAND': cmd, 'TEXT': displayText }); 
-
-      if (!skipAudio) {
-        var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText]; 
-        sentenceQueue = rawSentences.map(function(s) { 
-          return s.trim(); 
-        }).filter(function(s) { 
-          return s.length > 0; 
-        });
-        startTTSFetchLoop(generation); 
+      // Start audio only once the watch has accepted its new answer/session.
+      var textPayload = { 'COMMAND': cmd, 'TEXT': displayText, 'STREAM_ID': streamId };
+      function startAnswer() {
+        if (generation !== requestGeneration || skipAudio) return;
+        var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText];
+        sentenceQueue = rawSentences.map(function(part) { return part.trim(); }).filter(function(part) { return part.length > 0; });
+        startTTSFetchLoop(generation, streamId);
       }
+      Pebble.sendAppMessage(textPayload, startAnswer, function(error) {
+        if (generation !== requestGeneration) return;
+        console.log("Text delivery failed", error);
+        Pebble.sendAppMessage(textPayload, startAnswer, function() { console.log("Text retry failed"); });
+      });
 
     } else if (data.error && data.error.message) {
-      conversationHistory.pop(); 
+      // Failed requests do not modify the committed conversation history. 
       sendErrorToWatch("Gemini Err: " + data.error.message.substring(0, 60));
     } else {
       conversationHistory.pop();
@@ -551,126 +554,180 @@ function fetchGeminiResponse(prompt, skipAudio) {
 // SECTION 12: TEXT-TO-SPEECH INTERFACE PIPELINE
 // =========================================================================
 
-function startTTSFetchLoop(generation) {
-  if (generation !== requestGeneration) return;
-  if (isFetchingTTS || sentenceQueue.length === 0) return; 
-  isFetchingTTS = true; 
+// =========================================================================
+// SECTION 12: AUDIO PREPARATION (8-kHz WAV PCM16 -> IMA ADPCM)
+// =========================================================================
 
-  var sentence = sentenceQueue.shift(); 
-  var url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + ttsApiKey;
+function cancelCurrentAudio() {
+  requestGeneration++;
+  if (activeTransfer && activeTransfer.timer) clearTimeout(activeTransfer.timer);
+  activeTransfer = null;
+  currentAudioData = null;
+  currentAudioCursor = 0;
+  currentAudioSeq = 0;
+  lastAckTime = 0;
+  sentenceQueue = [];
+  readyAudioQueue = [];
+  isFetchingTTS = false;
+  isSendingBLE = false;
+  js_adpcm_valpred = 0;
+  js_adpcm_index = 0;
+}
 
-  var is16kHz = audioProfile.indexOf("16k") === 0;
+function pcmFromWav(base64) {
+  var wav = atob(base64);
+  if (wav.length < 44 || wav.substr(0, 4) !== 'RIFF' || wav.substr(8, 4) !== 'WAVE') throw Error('Invalid WAV');
+  function u16(p) { return wav.charCodeAt(p) | (wav.charCodeAt(p + 1) << 8); }
+  function u32(p) { return (wav.charCodeAt(p) | (wav.charCodeAt(p + 1) << 8) | (wav.charCodeAt(p + 2) << 16) | (wav.charCodeAt(p + 3) << 24)) >>> 0; }
+  var offset = 12, channels = 0, sampleRate = 0, bits = 0, format = 0, dataOffset = -1, dataLength = 0;
+  while (offset + 8 <= wav.length) {
+    var type = wav.substr(offset, 4), size = u32(offset + 4);
+    var end = offset + 8 + size;
+    if (end > wav.length) throw Error('Truncated WAV');
+    if (type === 'fmt ') {
+      if (size < 16) throw Error('Invalid WAV fmt');
+      format = u16(offset + 8); channels = u16(offset + 10);
+      sampleRate = u32(offset + 12); bits = u16(offset + 22);
+    } else if (type === 'data') {
+      dataOffset = offset + 8; dataLength = size;
+      break;
+    }
+    offset = end + (size & 1);
+  }
+  if (format !== 1 || channels !== 1 || bits !== 16 || sampleRate !== 8000 || dataOffset < 0) {
+    throw Error('Unsupported WAV PCM format');
+  }
+  var result = [];
+  for (var p = dataOffset; p + 1 < dataOffset + dataLength; p += 2) {
+    var value = u16(p);
+    result.push(value > 32767 ? value - 65536 : value);
+  }
+  if (!result.length) throw Error('Empty WAV');
+  return result;
+}
 
+function startTTSFetchLoop(generation, streamId) {
+  if (generation !== requestGeneration || isFetchingTTS || !sentenceQueue.length) return;
+  isFetchingTTS = true;
+  var sentence = sentenceQueue.shift();
+  var url = 'https://texttospeech.googleapis.com/v1/text:synthesize?key=' + ttsApiKey;
   fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       input: { text: sentence },
-      voice: { languageCode: 'en-US', name: ttsVoice }, 
-      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: is16kHz ? 16000 : 8000, speakingRate: 0.92 } 
+      voice: { languageCode: 'en-US', name: ttsVoice },
+      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 8000, speakingRate: 0.92 }
     })
-  })
-  .then(function(response) {
-    return response.json();
-  })
+  }).then(function(response) { return response.json(); })
   .then(function(data) {
     if (generation !== requestGeneration) return;
-    if (data.audioContent) {
-      var decoded = atob(data.audioContent); 
-      var pcm16 = []; 
-
-      for (var i = 44; i < decoded.length; i += 2) {
-        var low = decoded.charCodeAt(i);
-        var high = decoded.charCodeAt(i + 1);
-        var sample16 = (high << 8) | low; 
-        if (sample16 > 32767) { sample16 -= 65536; } 
-        pcm16.push(sample16);
-      }
-
-      pcm16 = lowPassFilter(pcm16);     
-      var adpcmBytes = encodeADPCM(pcm16); 
-      
-      readyAudioQueue.push(adpcmBytes); 
-    }
-    
-    isFetchingTTS = false; 
-    
-    if (!isSendingBLE) {
-        startBLESendLoop(generation); 
-    }
-    
-    startTTSFetchLoop(generation); 
-  })
-  .catch(function(err) {
-    if (generation !== requestGeneration) return;
-    console.log('TTS Error', err);
+    if (!data.audioContent) throw Error(data.error && data.error.message || 'No TTS audio');
+    // Preserve ADPCM predictor state across consecutive sentences.
+    var pcm = pcmFromWav(data.audioContent);
+    readyAudioQueue.push(encodeADPCM(lowPassFilter(pcm)));
     isFetchingTTS = false;
-    startTTSFetchLoop(generation);
+    if (!isSendingBLE) startBLESendLoop(generation, streamId);
+    startTTSFetchLoop(generation, streamId);
+  })
+  .catch(function(error) {
+    if (generation !== requestGeneration) return;
+    isFetchingTTS = false;
+    console.log('TTS failed:', error.message || error);
+    // Failed sentences are not silently skipped: stop speech, preserve text.
+    cancelCurrentAudio();
+    Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:streamId });
   });
 }
 
 // =========================================================================
-// SECTION 13: BLUETOOTH PACKET DISPATCH ENGINE
+// SECTION 13: STOP-AND-WAIT AUDIO DELIVERY WITH WATCH-LEVEL ACKNOWLEDGMENTS
 // =========================================================================
 
-function startBLESendLoop(generation) {
-  if (generation !== requestGeneration) return;
-  if (isSendingBLE) return; 
-  if (readyAudioQueue.length === 0) return; 
-  
-  isSendingBLE = true; 
-  var adpcmBytes = readyAudioQueue.shift(); 
-  var cursor = 0; 
-  var retries = 0;
-
-  function sendNextChunk() {
-    if (generation !== requestGeneration) return;
-    var previousCursor = cursor; 
-    var chunk = [];              
-    var chunkSize = 400;         
-
-    for (var i = 0; i < chunkSize && cursor < adpcmBytes.length; i++, cursor++) {
-      chunk.push(adpcmBytes[cursor]); 
-    }
-
-    if (chunk.length > 0) {
-      Pebble.sendAppMessage(
-        { 'COMMAND': 'AUDIO_CHUNK', 'CHUNK': chunk },
-        function success() {
-          if (generation !== requestGeneration) return;
-          retries = 0;
-          setTimeout(sendNextChunk, 60);
-        },
-        function failure() {
-          if (generation !== requestGeneration) return;
-          cursor = previousCursor;
-          if (++retries > MAX_BLE_RETRIES) {
-            console.log('Audio transfer aborted after repeated failures');
-            readyAudioQueue = []; sentenceQueue = []; isSendingBLE = false;
-            return;
-          }
-          setTimeout(sendNextChunk, 200 * retries);
-        } 
-      );
-    } else {
-      Pebble.sendAppMessage(
-        { 'COMMAND': 'AUDIO_SENTENCE_END' },
-        function() { 
-            if (generation !== requestGeneration) return;
-            isSendingBLE = false;
-            setTimeout(function() { startBLESendLoop(generation); }, 120); 
-        },
-        function() { 
-            if (generation !== requestGeneration) return;
-            if (++retries > MAX_BLE_RETRIES) {
-              console.log("Sentence end failed");
-              readyAudioQueue = []; sentenceQueue = []; isSendingBLE = false;
-              return;
-            }
-            setTimeout(sendNextChunk, 300); 
-        }
-      );
-    }
+// The watch reports bytes currently free in its playback ring. Transport
+// success alone does not acknowledge audio reception; only AUDIO_ACK does.
+function sendPendingPacket(transfer) {
+  if (transfer.generation !== requestGeneration || activeTransfer !== transfer) return;
+  if (transfer.timer) clearTimeout(transfer.timer);
+  transfer.attempts++;
+  if (transfer.attempts > MAX_BLE_RETRIES) {
+    console.log('Audio stopped: retry limit reached at packet ' + transfer.seq);
+    cancelCurrentAudio();
+    Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:transfer.streamId });
+    return;
   }
-  sendNextChunk(); 
+  var payload = {
+    COMMAND: transfer.end ? 'AUDIO_SENTENCE_END' : 'AUDIO_CHUNK',
+    STREAM_ID: transfer.streamId,
+    SEQ: transfer.seq
+  };
+  if (!transfer.end) {
+    payload.CHUNK = transfer.chunk;
+    payload.SENTENCE_TOTAL = transfer.total;
+    payload.BUFFER_HINT = Math.round(rateBytesPerSecond);
+  }
+  Pebble.sendAppMessage(payload, function() {}, function(error) {
+    if (transfer.generation !== requestGeneration || activeTransfer !== transfer) return;
+    console.log('Transport retry', error);
+  });
+  transfer.timer = setTimeout(function() { sendPendingPacket(transfer); }, ACK_TIMEOUT_MS);
+}
+
+function handleAudioAck(dict) {
+  var t = activeTransfer;
+  if (!t || t.generation !== requestGeneration) return;
+  if (Number(dict.STREAM_ID) !== t.streamId || Number(dict.SEQ) !== t.seq) return;
+  if (t.timer) { clearTimeout(t.timer); t.timer = null; }
+  if (dict.COMMAND === 'AUDIO_WAIT') {
+    // Full buffer: do not flood the watch. Retry the same sequence after playback drains.
+    t.attempts = 0;
+    t.timer = setTimeout(function() { sendPendingPacket(t); }, 180);
+    return;
+  }
+  var now = Date.now();
+  if (lastAckTime && !t.end && t.attempts === 1) {
+    var measured = t.chunk.length * 1000 / Math.max(30, now - lastAckTime);
+    rateBytesPerSecond = Math.max(1000, Math.min(12000, 0.8 * rateBytesPerSecond + 0.2 * measured));
+  }
+  lastAckTime = now;
+  activeTransfer = null;
+  if (t.end) {
+    currentAudioSeq++;
+    isSendingBLE = false;
+    startBLESendLoop(t.generation, t.streamId);
+  } else {
+    currentAudioCursor += t.chunk.length;
+    currentAudioSeq++;
+    dispatchNextAudio(t.generation, t.streamId);
+  }
+}
+
+var currentAudioData = null;
+var currentAudioCursor = 0;
+var currentAudioSeq = 0;
+var currentAudioEndPending = false;
+
+function startBLESendLoop(generation, streamId) {
+  if (generation !== requestGeneration || isSendingBLE || !readyAudioQueue.length) return;
+  isSendingBLE = true;
+  currentAudioData = readyAudioQueue.shift();
+  currentAudioCursor = 0;
+  currentAudioEndPending = false;
+  dispatchNextAudio(generation, streamId);
+}
+
+function dispatchNextAudio(generation, streamId) {
+  if (generation !== requestGeneration || activeTransfer || !isSendingBLE) return;
+  var remaining = currentAudioData.length - currentAudioCursor;
+  var isEnd = remaining <= 0;
+  var chunk = isEnd ? null : currentAudioData.slice(currentAudioCursor, currentAudioCursor + AUDIO_PACKET_BYTES);
+  activeTransfer = {
+    generation: generation, streamId: streamId,
+    seq: currentAudioSeq, chunk: chunk, end: isEnd, total: currentAudioData.length,
+    attempts: 0, timer: null
+  };
+  // DATA packets tell the watch this sentence's total bytes; it can avoid
+  // starting a short sentence until every byte has arrived.
+  if (!isEnd) activeTransfer.total = currentAudioData.length;
+  sendPendingPacket(activeTransfer);
 }
