@@ -654,6 +654,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       Tuple *hint_tuple = dict_find(iterator, MESSAGE_KEY_BUFFER_HINT);
       if (s_sentence_received == 0) {
         if (!total_tuple || total_tuple->value->int32 <= 0 ||
+            (uint32_t)total_tuple->value->int32 < chunk_tuple->length ||
             s_sentence_count >= SENTENCE_QUEUE_SIZE) {
           send_audio_reply("AUDIO_WAIT", sequence);
           return;
