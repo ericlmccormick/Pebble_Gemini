@@ -350,7 +350,7 @@ static void update_text_layout() {
       s_speaker_open = false;
       s_rebuffering = true;
       s_start_threshold = 4000;
-      set_status("Buffering audio...");
+      set_status(NULL); // Never leave a permanent buffering label after playback.
       return;
     }
     s_playback_timer = app_timer_register(PLAYBACK_INTERVAL_MS, playback_timer_callback, NULL);
