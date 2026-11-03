@@ -15,7 +15,26 @@ var customPersona = localStorage.getItem("CUSTOM_PERSONA") || "";
 
 // Restore dynamic dropdown configurations with updated default
 var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.8-flash"; 
-var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Journey-F";        
+// Migrate legacy Chirp3 aliases, which never existed in Google's TTS catalog.
+var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Journey-F";
+var TTS_VOICE_ALIASES = {
+  "en-US-Chirp3-HD-F": "en-US-Chirp3-HD-Kore",
+  "en-US-Chirp3-HD-M": "en-US-Chirp3-HD-Charon"
+};
+var SUPPORTED_TTS_VOICES = [
+  "en-US-Journey-F", "en-US-Journey-D",
+  "en-US-Chirp3-HD-Kore", "en-US-Chirp3-HD-Aoede",
+  "en-US-Chirp3-HD-Leda", "en-US-Chirp3-HD-Zephyr",
+  "en-US-Chirp3-HD-Charon", "en-US-Chirp3-HD-Puck",
+  "en-US-Studio-O", "en-US-Studio-M",
+  "en-US-Neural2-C", "en-US-Neural2-D"
+];
+function normalizeTtsVoice(name) {
+  var migrated = TTS_VOICE_ALIASES[name] || name;
+  return SUPPORTED_TTS_VOICES.indexOf(migrated) >= 0 ? migrated : "en-US-Journey-F";
+}
+ttsVoice = normalizeTtsVoice(ttsVoice);
+localStorage.setItem("TTS_VOICE", ttsVoice);        
 var audioProfile = "8k-16b"; // Hardware output is 8-kHz PCM16, transmitted as 4-bit IMA ADPCM.          
 
 // LOGIC: Evaluate the user's TTS preference based on history
@@ -187,11 +206,15 @@ if (hasSpeaker) {
     "options": [ 
       { "label": "Journey Female (Default)", "value": "en-US-Journey-F" },
       { "label": "Journey Male", "value": "en-US-Journey-D" },
-      { "label": "Chirp 3 HD Female", "value": "en-US-Chirp3-HD-F" },
-      { "label": "Chirp 3 HD Male", "value": "en-US-Chirp3-HD-M" },
+      { "label": "Chirp 3 HD Kore (Female)", "value": "en-US-Chirp3-HD-Kore" },
+      { "label": "Chirp 3 HD Aoede (Female)", "value": "en-US-Chirp3-HD-Aoede" },
+      { "label": "Chirp 3 HD Leda (Female)", "value": "en-US-Chirp3-HD-Leda" },
+      { "label": "Chirp 3 HD Zephyr (Female)", "value": "en-US-Chirp3-HD-Zephyr" },
+      { "label": "Chirp 3 HD Charon (Male)", "value": "en-US-Chirp3-HD-Charon" },
+      { "label": "Chirp 3 HD Puck (Male)", "value": "en-US-Chirp3-HD-Puck" },
       { "label": "Studio Female", "value": "en-US-Studio-O" },
       { "label": "Studio Male", "value": "en-US-Studio-M" },
-      { "label": "Neural2 Female", "value": "en-US-Neural2-F" },
+      { "label": "Neural2 Female", "value": "en-US-Neural2-C" },
       { "label": "Neural2 Male", "value": "en-US-Neural2-D" }
     ]
   });
@@ -396,7 +419,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
   }
 
   if (settings.TTS_VOICE) {
-    ttsVoice = settings.TTS_VOICE.value || "en-US-Journey-F"; 
+    ttsVoice = normalizeTtsVoice(settings.TTS_VOICE.value || "en-US-Journey-F"); 
     localStorage.setItem("TTS_VOICE", ttsVoice); 
   }
 
@@ -616,35 +639,63 @@ function pcmFromWav(base64) {
   return result;
 }
 
+function isInvalidVoiceError(error) {
+  var message = String(error && error.message || error || '').toLowerCase();
+  return message.indexOf('voice') >= 0 &&
+    (message.indexOf('does not exist') >= 0 ||
+     message.indexOf('not found') >= 0 ||
+     message.indexOf('invalid') >= 0 ||
+     message.indexOf('misspelled') >= 0);
+}
+
 function startTTSFetchLoop(generation, streamId) {
   if (generation !== requestGeneration || isFetchingTTS || !sentenceQueue.length) return;
   isFetchingTTS = true;
   var sentence = sentenceQueue.shift();
   var url = 'https://texttospeech.googleapis.com/v1/text:synthesize?key=' + ttsApiKey;
-  fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      input: { text: sentence },
-      voice: { languageCode: 'en-US', name: ttsVoice },
-      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 8000, speakingRate: 0.92 }
-    })
-  }).then(function(response) { return response.json(); })
-  .then(function(data) {
-    if (generation !== requestGeneration) return;
-    if (!data.audioContent) throw Error(data.error && data.error.message || 'No TTS audio');
-    // Preserve ADPCM predictor state across consecutive sentences.
-    var pcm = pcmFromWav(data.audioContent);
-    readyAudioQueue.push(encodeADPCM(lowPassFilter(pcm)));
-    isFetchingTTS = false;
-    if (!isSendingBLE) startBLESendLoop(generation, streamId);
-    startTTSFetchLoop(generation, streamId);
-  })
-  .catch(function(error) {
+  var primaryVoice = normalizeTtsVoice(ttsVoice);
+  var fallbackVoice = "en-US-Journey-F";
+
+  function synthesize(voiceName, fallbackAttempt) {
+    var audioConfig = { audioEncoding: 'LINEAR16', sampleRateHertz: 8000 };
+    // Chirp 3 HD does not support the standard speakingRate audioConfig field.
+    if (voiceName.indexOf('-Chirp3-HD-') < 0) audioConfig.speakingRate = 0.92;
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text: sentence },
+        voice: { languageCode: 'en-US', name: voiceName },
+        audioConfig: audioConfig
+      })
+    }).then(function(response) {
+      return response.json();
+    }).then(function(data) {
+      if (generation !== requestGeneration) return;
+      if (!data.audioContent) {
+        var apiError = new Error(data.error && data.error.message || 'No TTS audio');
+        if (!fallbackAttempt && voiceName !== fallbackVoice && isInvalidVoiceError(apiError)) {
+          console.log('Invalid selected voice; retrying with Journey-F');
+          ttsVoice = fallbackVoice;
+          localStorage.setItem("TTS_VOICE", fallbackVoice);
+          return synthesize(fallbackVoice, true);
+        }
+        throw apiError;
+      }
+      var pcm = pcmFromWav(data.audioContent);
+      if (generation !== requestGeneration) return;
+      readyAudioQueue.push(encodeADPCM(lowPassFilter(pcm)));
+      isFetchingTTS = false;
+      if (!isSendingBLE) startBLESendLoop(generation, streamId);
+      startTTSFetchLoop(generation, streamId);
+    });
+  }
+
+  synthesize(primaryVoice, false).catch(function(error) {
     if (generation !== requestGeneration) return;
     isFetchingTTS = false;
     console.log('TTS failed:', error.message || error);
-    // Failed sentences are not silently skipped: stop speech, preserve text.
+    // Stop speech, but leave the successfully displayed answer intact.
     cancelCurrentAudio();
     Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:streamId });
   });
