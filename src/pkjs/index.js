@@ -120,6 +120,7 @@ var requestGeneration = 0;
 var MAX_BLE_RETRIES = 5;
 var nextStreamId = (Date.now() & 0x7fffffff) || 1;
 var activeTransfer = null;
+var streamEndSent = false;
 var AUDIO_PACKET_BYTES = 360; // Leaves room for command/session/sequence tuples.
 var ACK_TIMEOUT_MS = 1800;
 var rateBytesPerSecond = 5200; // Conservative initial link estimate.
@@ -657,6 +658,7 @@ function cancelCurrentAudio() {
   requestGeneration++;
   if (activeTransfer && activeTransfer.timer) clearTimeout(activeTransfer.timer);
   activeTransfer = null;
+  streamEndSent = false;
   currentAudioData = null;
   currentAudioCursor = 0;
   currentAudioSeq = 0;
@@ -748,6 +750,7 @@ function startTTSFetchLoop(generation, streamId) {
       isFetchingTTS = false;
       if (!isSendingBLE) startBLESendLoop(generation, streamId);
       startTTSFetchLoop(generation, streamId);
+      maybeFinishAudioStream(generation, streamId);
     });
   }
 
@@ -778,11 +781,11 @@ function sendPendingPacket(transfer) {
     return;
   }
   var payload = {
-    COMMAND: transfer.end ? 'AUDIO_SENTENCE_END' : 'AUDIO_CHUNK',
+    COMMAND: transfer.final ? 'AUDIO_STREAM_END' : (transfer.end ? 'AUDIO_SENTENCE_END' : 'AUDIO_CHUNK'),
     STREAM_ID: transfer.streamId,
     SEQ: transfer.seq
   };
-  if (!transfer.end) {
+  if (!transfer.end && !transfer.final) {
     payload.CHUNK = transfer.chunk;
     payload.SENTENCE_TOTAL = transfer.total;
     payload.BUFFER_HINT = Math.round(rateBytesPerSecond);
@@ -813,13 +816,17 @@ function handleAudioAck(dict) {
     return;
   }
   var now = Date.now();
-  if (lastAckTime && !t.end && t.attempts === 1) {
+  if (lastAckTime && !t.end && !t.final && t.attempts === 1) {
     var measured = t.chunk.length * 1000 / Math.max(30, now - lastAckTime);
     rateBytesPerSecond = Math.max(1000, Math.min(12000, 0.8 * rateBytesPerSecond + 0.2 * measured));
   }
   lastAckTime = now;
   activeTransfer = null;
-  if (t.end) {
+  if (t.final) {
+    currentAudioSeq++;
+    streamEndSent = true;
+    isSendingBLE = false;
+  } else if (t.end) {
     currentAudioSeq++;
     isSendingBLE = false;
     startBLESendLoop(t.generation, t.streamId);
@@ -834,8 +841,26 @@ var currentAudioData = null;
 var currentAudioCursor = 0;
 var currentAudioSeq = 0;
 
+function maybeFinishAudioStream(generation, streamId) {
+  if (generation !== requestGeneration || streamEndSent || activeTransfer ||
+      isSendingBLE || isFetchingTTS || sentenceQueue.length || readyAudioQueue.length) return;
+  // Explicit final marker: a sentence end is NOT the end of the response.
+  // Keep the speaker active while synthesizing/streaming later sentences.
+  isSendingBLE = true;
+  activeTransfer = {
+    generation: generation, streamId: streamId,
+    seq: currentAudioSeq, chunk: null, end: false, final: true,
+    attempts: 0, timer: null
+  };
+  sendPendingPacket(activeTransfer);
+}
+
 function startBLESendLoop(generation, streamId) {
-  if (generation !== requestGeneration || isSendingBLE || !readyAudioQueue.length) return;
+  if (generation !== requestGeneration || isSendingBLE) return;
+  if (!readyAudioQueue.length) {
+    maybeFinishAudioStream(generation, streamId);
+    return;
+  }
   isSendingBLE = true;
   lastAckTime = 0; // Do not mistake a gap between TTS sentences for slow BLE.
   currentAudioData = readyAudioQueue.shift();
@@ -850,7 +875,7 @@ function dispatchNextAudio(generation, streamId) {
   var chunk = isEnd ? null : currentAudioData.slice(currentAudioCursor, currentAudioCursor + AUDIO_PACKET_BYTES);
   activeTransfer = {
     generation: generation, streamId: streamId,
-    seq: currentAudioSeq, chunk: chunk, end: isEnd, total: currentAudioData.length,
+    seq: currentAudioSeq, chunk: chunk, end: isEnd, final: false, total: currentAudioData.length,
     attempts: 0, timer: null
   };
   // DATA packets tell the watch this sentence's total bytes; it can avoid
