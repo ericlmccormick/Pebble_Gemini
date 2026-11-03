@@ -108,7 +108,7 @@ static void window_click_config_provider(void *context);
 static void pinwheel_timer_callback(void *data) {
   s_pinwheel_timer = NULL;                      
   s_pinwheel_angle = (s_pinwheel_angle + 30) % 360; 
-  layer_mark_dirty(s_pinwheel_layer);           
+  if (s_pinwheel_layer) layer_mark_dirty(s_pinwheel_layer);           
   if (s_current_state == UI_STATE_THINKING) {    
     s_pinwheel_timer = app_timer_register(100, pinwheel_timer_callback, NULL); 
   }
@@ -207,7 +207,10 @@ static void update_text_layout() {
     text_layer_set_text(s_volume_text_layer, vol_buf); 
     layer_set_hidden(text_layer_get_layer(s_volume_text_layer), false); 
 
-    if (s_volume_timer) app_timer_cancel(s_volume_timer); 
+    if (s_volume_timer) {
+      app_timer_cancel(s_volume_timer);
+      s_volume_timer = NULL;
+    } 
     s_volume_timer = app_timer_register(2000, hide_volume_layer_callback, NULL); 
   }
 
@@ -462,7 +465,11 @@ static void window_click_config_provider(void *context) {
 // =========================================================================
 
 static void set_ui_state(UIState state) {
-  s_current_state = state;                      
+  s_current_state = state;
+  if (state != UI_STATE_THINKING && s_pinwheel_timer) {
+    app_timer_cancel(s_pinwheel_timer);
+    s_pinwheel_timer = NULL;
+  }                      
   
   window_set_click_config_provider(s_main_window, window_click_config_provider);
 
@@ -505,6 +512,9 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
   if (strncmp(command_tuple->value->cstring, "TEXT_RESPONSE", 13) == 0) { 
     bool no_audio = false;
+    #ifdef PBL_SPEAKER
+      stop_audio(); // Discard previous answer before accepting a new session.
+    #endif
 
     #ifdef PBL_SPEAKER
       // MULTIPLEXING INTERCEPT: Determine if the phone told us to expect audio chunks
@@ -739,14 +749,24 @@ static void main_window_load(Window *window) {
 }
 
 static void main_window_unload(Window *window) {
+  if (s_pinwheel_timer) {
+    app_timer_cancel(s_pinwheel_timer);
+    s_pinwheel_timer = NULL;
+  }
   #ifdef PBL_SPEAKER
     stop_audio();                               
     if (s_volume_timer) app_timer_cancel(s_volume_timer); 
     text_layer_destroy(s_volume_text_layer);    
   #endif
   
-  dictation_session_destroy(s_dictation_session); 
-  if (s_logo_bitmap) gbitmap_destroy(s_logo_bitmap); 
+  if (s_dictation_session) {
+    dictation_session_destroy(s_dictation_session);
+    s_dictation_session = NULL;
+  } 
+  if (s_logo_bitmap) {
+    gbitmap_destroy(s_logo_bitmap);
+    s_logo_bitmap = NULL;
+  } 
   bitmap_layer_destroy(s_logo_layer);           
   text_layer_destroy(s_title_layer);            
   text_layer_destroy(s_prompt_layer);           
@@ -765,7 +785,9 @@ static void main_window_unload(Window *window) {
 static void init() {
   #ifdef PBL_SPEAKER
     if (persist_exists(PERSIST_KEY_VOLUME)) s_volume = persist_read_int(PERSIST_KEY_VOLUME) / 100.0f;
-    else s_volume = 1.0f; 
+    else s_volume = 1.0f;
+    if (s_volume < 0.0f) s_volume = 0.0f;
+    if (s_volume > 1.0f) s_volume = 1.0f; 
   #endif
   
   app_message_register_inbox_received(inbox_received_callback); 
