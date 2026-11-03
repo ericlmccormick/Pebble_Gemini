@@ -53,8 +53,26 @@ assert.equal(context.platformHasSpeaker('gabbro'), false, 'Round 2 must stay tex
 assert.equal(context.platformHasSpeaker('basalt'), false);
 assert.equal(context.platformHasSpeaker('chalk'), false);
 assert.equal(context.platformHasSpeaker('diorite'), false);
-assert.equal(context.platformHasSpeaker('flint'), false, 'Flint support requires a separate validated native build');
+assert.equal(context.platformHasSpeaker('flint'), true, 'Pebble 2 Duo has a speaker');
 assert.equal(context.platformHasSpeaker(undefined), false);
+const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+const expectedPlatforms = ['basalt', 'chalk', 'diorite', 'flint', 'emery', 'gabbro'];
+assert.deepEqual(manifest.pebble.targetPlatforms.slice().sort(), expectedPlatforms.slice().sort(),
+  'Every microphone-equipped Pebble platform must be targeted');
+assert.equal(manifest.pebble.targetPlatforms.includes('aplite'), false,
+  'Original Pebble has no microphone for dictation');
+for (const platform of expectedPlatforms) {
+  const matches = manifest.pebble.resources.media.filter(media =>
+    media.name === 'IMAGE_GEMINI_LOGO' && media.targetPlatforms.includes(platform));
+  assert.equal(matches.length, 1, platform + ' must have exactly one logo bitmap');
+}
+assert.equal(manifest.pebble.resources.media.some(media =>
+  media.file === 'images/gemini_logo_diorite.png' &&
+  media.targetPlatforms.includes('flint')), true, 'Flint reuses the B/W logo');
+assert.equal(manifest.pebble.resources.media.some(media =>
+  media.file === 'images/gemini_logo_chalk.png' &&
+  media.targetPlatforms.includes('gabbro')), true, 'Round 2 uses the round logo');
+
 
 // Guard against the playback regression that queued silence directly
 // behind newly written PCM and made small pauses (e.g. commas) choppy.
