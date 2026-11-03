@@ -46,6 +46,10 @@ this.testAPI = {
   state: function() { return {seq:currentAudioSeq,active:activeTransfer, sending:isSendingBLE, generation:requestGeneration}; }
 };`, context);
 const api = context.testAPI;
+assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-F'), 'en-US-Chirp3-HD-Kore');
+assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-M'), 'en-US-Chirp3-HD-Charon');
+assert.equal(context.normalizeTtsVoice('en-US-Neural2-F'), 'en-US-Journey-F');
+assert.equal(context.isInvalidVoiceError(Error("Voice 'en-US-Chirp3-HD-F' does not exist. Is it misspelled?")), true);
 
 assert.equal(api.adpcm([0, 1200, -1200, 1000]).length, 2, 'ADPCM is 4 bits/sample');
 const wav = Buffer.alloc(44 + 8);
@@ -84,4 +88,4 @@ api.cancel();
 api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:315, SEQ:oldSeq});
 assert.equal(api.state().active,null);
 assert.equal(api.state().generation,2);
-console.log('PASS: WAV parser, ADPCM, sequencing, duplicate/old ACKs, cancellation');
+console.log('PASS: WAV, ADPCM, sequencing, duplicate/old ACKs, cancellation, TTS voice migration');
