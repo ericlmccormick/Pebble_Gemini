@@ -9,15 +9,15 @@
 #ifdef PBL_SPEAKER
   #define RING_BUFFER_SIZE 16384           
   #define PERSIST_KEY_VOLUME 100           
-  #define PLAYBACK_ADPCM_BYTES 800         
+  #define PLAYBACK_ADPCM_BYTES 160  // 40 ms per decode block at 8 kHz         
   #define PLAYBACK_PCM_SAMPLES (PLAYBACK_ADPCM_BYTES * 2) 
-  #define PLAYBACK_INTERVAL_MS 60 // Retry hardware writes frequently without overfilling speaker FIFO         
+  #define PLAYBACK_INTERVAL_MS 35 // Refill in small PCM blocks, without stacking long audio ahead         
   #define START_BUFFER_THRESHOLD 2400  // 0.6 seconds of ADPCM at 8 kHz
   #define MAX_START_BUFFER 12000    // Leave room for incoming packets
   #define SPEAKER_BYTES_PER_SECOND 4000      
   #define STREAM_FINISH_DRAIN_MS 700  // Flush last PCM and silent tail before amplifier shutdown
   #define STREAM_IDLE_FAILSAFE_MS 30000 // Recover if phone disappears between sentences
-  #define SILENCE_PCM_SAMPLES 480     // 60 ms of silence at 8 kHz       
+  #define SILENCE_PCM_SAMPLES 320     // 40 ms of silence at 8 kHz       
 #endif
 
 // =========================================================================
@@ -332,13 +332,14 @@ static void update_text_layout() {
     s_playback_timer = NULL;
     if (!s_speaker_open) return;
 
-    // The hardware can accept fewer PCM bytes than requested. Keep the
-    // unsent tail instead of silently losing it and decoding the next block.
+    // Keep the next 40 ms of PCM pending until the speaker FIFO accepts
+    // it. Decoding only the buffered data that is actually available avoids
+    // turning a normal packet gap (or a comma) into an artificial pause.
     if (s_pending_pcm_offset == s_pending_pcm_bytes) {
       s_pending_pcm_offset = 0;
       s_pending_pcm_bytes = 0;
-      uint32_t available = s_buffer_count >= PLAYBACK_ADPCM_BYTES ?
-                           PLAYBACK_ADPCM_BYTES : (s_sentence_ended ? s_buffer_count : 0);
+      uint32_t available = s_buffer_count < PLAYBACK_ADPCM_BYTES ?
+                           s_buffer_count : PLAYBACK_ADPCM_BYTES;
       if (available > 0) {
         for (uint32_t i = 0; i < available; i++) {
           uint8_t encoded = s_ring_buffer[s_head];
@@ -358,13 +359,10 @@ static void update_text_layout() {
         ((uint8_t*)s_pending_pcm) + s_pending_pcm_offset, remaining);
       if (written > remaining) written = remaining;
       s_pending_pcm_offset += written;
-    }
-
-    if (s_pending_pcm_offset == s_pending_pcm_bytes && s_buffer_count == 0) {
-      // Preserve amplifier power across sentence boundaries. Feed silence
-      // while waiting for the next synthesized sentence; otherwise an empty
-      // hardware FIFO can shut the amplifier off and make it pop on restart.
-      // The ADPCM predictor is untouched by these PCM silence samples.
+    } else if (s_buffer_count == 0) {
+      // Only feed silence on a genuinely empty playback tick. The previous
+      // code appended silence immediately after writing real speech, which
+      // could queue extra silence *ahead* of an upcoming phrase.
       schedule_close_timer();
       speaker_stream_write((uint8_t*)s_silence_pcm, sizeof(s_silence_pcm));
     }
