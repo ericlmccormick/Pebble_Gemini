@@ -14,7 +14,7 @@ var fontSize = localStorage.getItem("FONT_SIZE") || 24;
 var customPersona = localStorage.getItem("CUSTOM_PERSONA") || ""; 
 
 // Restore dynamic dropdown configurations with updated default
-var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.5-flash"; 
+var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.8-flash"; 
 var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Journey-F";        
 var audioProfile = "8k-16b"; // Hardware output is 8-kHz PCM16, transmitted as 4-bit IMA ADPCM.          
 
@@ -162,9 +162,10 @@ var advancedSettingsItems = [
     "messageKey": "GEMINI_MODEL",
     "label": "Gemini Model Version",
     "defaultValue": geminiModel,
-    "description": "Select the generation engine. Default is Gemini 3.5 Flash.",
+    "description": "Select the generation engine. Default is Gemini 3.8 Flash.",
     "options": [ 
-      { "label": "Gemini 3.7 Flash", "value": "gemini-3.7-flash" },
+      { "label": "Gemini 3.8 Flash (Default)", "value": "gemini-3.8-flash" },
+      { "label": "Gemini 3.7 Flash (Alias)", "value": "gemini-3.7-flash" },
       { "label": "Gemini 3.6 Flash", "value": "gemini-3.6-flash" },
       { "label": "Gemini 3.5 Flash", "value": "gemini-3.5-flash" },
       { "label": "Gemini 3.5 Flash-Lite", "value": "gemini-3.5-flash-lite" },
@@ -344,8 +345,9 @@ function encodeADPCM(pcm16) {
 }
 
 function lowPassFilter(samples) {
-  var filtered = []; 
-  filtered[0] = samples[0]; 
+  if (samples.length < 3) return samples.slice();
+  var filtered = [];
+  filtered[0] = samples[0];
   filtered[1] = samples[1]; 
   for (var i = 2; i < samples.length; i++) {
     filtered[i] = (samples[i] + samples[i - 1] + samples[i - 2]) / 3;
@@ -502,7 +504,12 @@ function fetchGeminiResponse(prompt, skipAudio) {
   .then(function(data) {
     if (generation !== requestGeneration) return;
     if (data.candidates && data.candidates.length > 0) {
-      var replyText = data.candidates[0].content.parts[0].text; 
+      var parts = data.candidates[0].content && data.candidates[0].content.parts || [];
+      var replyText = parts.map(function(part) { return part.text || ''; }).join(' ').trim();
+      if (!replyText) {
+        sendErrorToWatch('Gemini returned no readable text.');
+        return;
+      } 
       
       conversationHistory = historyForRequest;
       conversationHistory.push({ role: "model", parts: [{ text: replyText }] }); 
