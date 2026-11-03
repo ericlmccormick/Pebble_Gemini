@@ -14,7 +14,8 @@
   #define PLAYBACK_INTERVAL_MS 35 // Refill in small PCM blocks, without stacking long audio ahead         
   #define START_BUFFER_THRESHOLD 2400  // 0.6 seconds of ADPCM at 8 kHz
   #define MAX_START_BUFFER 12000    // Leave room for incoming packets
-  #define SPEAKER_BYTES_PER_SECOND 4000      
+  #define SPEAKER_BYTES_PER_SECOND 4000
+  #define SENTENCE_QUEUE_SIZE 32 // Prebuffer independently for each spoken sentence      
   #define STREAM_FINISH_DRAIN_MS 700  // Flush last PCM and silent tail before amplifier shutdown
   #define STREAM_IDLE_FAILSAFE_MS 30000 // Recover if phone disappears between sentences
   #define SILENCE_PCM_SAMPLES 240     // 30 ms, less than the 35-ms tick to avoid accumulating silent backlog       
@@ -69,6 +70,21 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static uint32_t s_sentence_received = 0;
   static uint32_t s_start_threshold = START_BUFFER_THRESHOLD;
   static bool s_rebuffering = false;
+  // Sentence boundaries are offsets in the continuous ADPCM byte stream.
+  // The ring may contain future sentences; they must not play until their
+  // own startup reserve is available, even while the amplifier stays on.
+  typedef struct {
+    uint32_t start;
+    uint32_t end;
+    uint32_t start_threshold;
+    bool started;
+  } AudioSentence;
+  static AudioSentence s_sentences[SENTENCE_QUEUE_SIZE];
+  static uint8_t s_sentence_head = 0;
+  static uint8_t s_sentence_tail = 0;
+  static uint8_t s_sentence_count = 0;
+  static uint32_t s_received_audio_bytes = 0;
+  static uint32_t s_consumed_audio_bytes = 0;
   static int16_t s_pending_pcm[PLAYBACK_PCM_SAMPLES];
   static uint32_t s_pending_pcm_bytes = 0;
   static uint32_t s_pending_pcm_offset = 0;           
@@ -256,13 +272,40 @@ static void update_text_layout() {
     return target;
   }
 
+  static AudioSentence *active_sentence(void) {
+    while (s_sentence_count > 0) {
+      AudioSentence *sentence = &s_sentences[s_sentence_head];
+      if (s_consumed_audio_bytes < sentence->end) return sentence;
+      s_sentence_head = (s_sentence_head + 1) % SENTENCE_QUEUE_SIZE;
+      s_sentence_count--;
+    }
+    return NULL;
+  }
+
+  static bool sentence_ready(AudioSentence *sentence) {
+    if (!sentence) return false;
+    if (sentence->started) return true;
+    // This excludes prefetched bytes belonging to later sentences.
+    uint32_t stored = s_received_audio_bytes > sentence->start ?
+                      s_received_audio_bytes - sentence->start : 0;
+    uint32_t total = sentence->end - sentence->start;
+    if (stored > total) stored = total;
+    uint32_t consumed = s_consumed_audio_bytes > sentence->start ?
+                        s_consumed_audio_bytes - sentence->start : 0;
+    uint32_t unplayed = stored > consumed ? stored - consumed : 0;
+    if (unplayed >= sentence->start_threshold || stored == total) {
+      sentence->started = true;
+      s_rebuffering = false;
+      return true;
+    }
+    return false;
+  }
+
   static void maybe_start_playback() {
     if (s_ignore_audio || s_speaker_open) return;
-    if (s_buffer_count >= s_start_threshold || (s_sentence_ended && s_buffer_count > 0)) {
-      start_playback();
-    }
+    if (sentence_ready(active_sentence())) start_playback();
   }
- 
+
   static void delayed_close_callback(void *data);  
 
   static void cancel_close_timer() {
@@ -332,24 +375,34 @@ static void update_text_layout() {
     s_playback_timer = NULL;
     if (!s_speaker_open) return;
 
-    // Keep the next 40 ms of PCM pending until the speaker FIFO accepts
-    // it. Decoding only the buffered data that is actually available avoids
-    // turning a normal packet gap (or a comma) into an artificial pause.
+    // A new sentence must independently satisfy its prebuffer threshold.
+    // Do not let prefetched audio from a later sentence bypass this gate.
     if (s_pending_pcm_offset == s_pending_pcm_bytes) {
       s_pending_pcm_offset = 0;
       s_pending_pcm_bytes = 0;
-      uint32_t available = s_buffer_count < PLAYBACK_ADPCM_BYTES ?
-                           s_buffer_count : PLAYBACK_ADPCM_BYTES;
-      if (available > 0) {
-        for (uint32_t i = 0; i < available; i++) {
-          uint8_t encoded = s_ring_buffer[s_head];
-          s_head = (s_head + 1) % RING_BUFFER_SIZE;
-          s_buffer_count--;
-          s_pending_pcm[i * 2] = decode_adpcm_to_16bit((encoded >> 4) & 15);
-          s_pending_pcm[i * 2 + 1] = decode_adpcm_to_16bit(encoded & 15);
+      AudioSentence *sentence = active_sentence();
+      if (sentence && sentence_ready(sentence)) {
+        uint32_t remaining_in_sentence = sentence->end - s_consumed_audio_bytes;
+        uint32_t available = s_buffer_count;
+        if (available > remaining_in_sentence) available = remaining_in_sentence;
+        if (available > PLAYBACK_ADPCM_BYTES) available = PLAYBACK_ADPCM_BYTES;
+        if (available > 0) {
+          for (uint32_t i = 0; i < available; i++) {
+            uint8_t encoded = s_ring_buffer[s_head];
+            s_head = (s_head + 1) % RING_BUFFER_SIZE;
+            s_buffer_count--;
+            s_pending_pcm[i * 2] = decode_adpcm_to_16bit((encoded >> 4) & 15);
+            s_pending_pcm[i * 2 + 1] = decode_adpcm_to_16bit(encoded & 15);
+          }
+          s_consumed_audio_bytes += available;
+          s_pending_pcm_bytes = available * 4;
+        } else {
+          // Connection underrun: wait for more than one packet before
+          // resuming this sentence. Keep the amplifier powered meanwhile.
+          sentence->started = false;
+          if (sentence->start_threshold < 4000) sentence->start_threshold = 4000;
+          s_rebuffering = true;
         }
-        s_pending_pcm_bytes = available * 4;
-        if (s_buffer_count == 0) s_sentence_ended = false;
       }
     }
 
@@ -359,10 +412,9 @@ static void update_text_layout() {
         ((uint8_t*)s_pending_pcm) + s_pending_pcm_offset, remaining);
       if (written > remaining) written = remaining;
       s_pending_pcm_offset += written;
-    } else if (s_buffer_count == 0) {
-      // Only feed silence on a genuinely empty playback tick. The previous
-      // code appended silence immediately after writing real speech, which
-      // could queue extra silence *ahead* of an upcoming phrase.
+    } else if (s_pending_pcm_offset == s_pending_pcm_bytes) {
+      // Silence on an idle tick preserves amplifier power while the next
+      // sentence fills its own reserve, even if its bytes are already queued.
       schedule_close_timer();
       speaker_stream_write((uint8_t*)s_silence_pcm, sizeof(s_silence_pcm));
     }
@@ -395,6 +447,8 @@ static void update_text_layout() {
     s_sentence_received = 0;
     s_start_threshold = START_BUFFER_THRESHOLD;
     s_rebuffering = false;
+    s_sentence_head = s_sentence_tail = s_sentence_count = 0;
+    s_received_audio_bytes = s_consumed_audio_bytes = 0;
     set_status(NULL);                           
   }
 
@@ -556,6 +610,8 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
           s_expected_seq = 0;
           s_start_threshold = START_BUFFER_THRESHOLD;
           s_rebuffering = false;
+          s_sentence_head = s_sentence_tail = s_sentence_count = 0;
+          s_received_audio_bytes = s_consumed_audio_bytes = 0;
           Tuple *stream_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
           if (stream_tuple) s_stream_id = (uint32_t)stream_tuple->value->int32;
           if (s_volume > 0.01f) {
@@ -596,22 +652,38 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       }
       Tuple *total_tuple = dict_find(iterator, MESSAGE_KEY_SENTENCE_TOTAL);
       Tuple *hint_tuple = dict_find(iterator, MESSAGE_KEY_BUFFER_HINT);
-      if (s_sentence_received == 0 && total_tuple) {
-        s_sentence_total = (uint32_t)total_tuple->value->int32;
+      if (s_sentence_received == 0) {
+        if (!total_tuple || total_tuple->value->int32 <= 0 ||
+            s_sentence_count >= SENTENCE_QUEUE_SIZE) {
+          send_audio_reply("AUDIO_WAIT", sequence);
+          return;
+        }
+        uint32_t length = (uint32_t)total_tuple->value->int32;
+        uint32_t rate = hint_tuple ? (uint32_t)hint_tuple->value->int32 : 5200;
+        AudioSentence *sentence = &s_sentences[s_sentence_tail];
+        sentence->start = s_received_audio_bytes;
+        sentence->end = s_received_audio_bytes + length;
+        sentence->start_threshold = choose_start_threshold(length, rate);
+        sentence->started = false;
+        s_sentence_tail = (s_sentence_tail + 1) % SENTENCE_QUEUE_SIZE;
+        s_sentence_count++;
+        s_sentence_total = length;
       }
-      // Re-evaluate the required startup reservoir as the phone measures
-      // actual BLE throughput; start early on fast links and wait longer
-      // when the link cannot replenish the buffer as quickly as audio plays.
-      if (!s_speaker_open && s_sentence_total > 0) {
-        uint32_t link_rate = hint_tuple ? (uint32_t)hint_tuple->value->int32 : 5200;
-        uint32_t threshold = choose_start_threshold(s_sentence_total, link_rate);
-        if (s_rebuffering && threshold < 4000)
-          threshold = 4000; // Recovery hysteresis after an underrun.
-        s_start_threshold = threshold;
+      // Keep re-evaluating only the sentence that is currently filling;
+      // later packets provide better throughput estimates than the first.
+      if (s_sentence_count && hint_tuple && s_sentence_total) {
+        uint8_t last = (s_sentence_tail + SENTENCE_QUEUE_SIZE - 1) % SENTENCE_QUEUE_SIZE;
+        AudioSentence *sentence = &s_sentences[last];
+        if (!sentence->started) {
+          uint32_t target = choose_start_threshold(s_sentence_total, (uint32_t)hint_tuple->value->int32);
+          if (s_rebuffering && target < 4000) target = 4000;
+          sentence->start_threshold = target;
+        }
       }
       s_sentence_ended = false;
       push_to_ring_buffer(chunk_tuple->value->data, chunk_tuple->length);
       s_sentence_received += chunk_tuple->length;
+      s_received_audio_bytes += chunk_tuple->length;
       s_expected_seq++;
       send_audio_reply("AUDIO_ACK", sequence);
       maybe_start_playback();
