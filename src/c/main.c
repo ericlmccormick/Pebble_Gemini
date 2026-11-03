@@ -15,7 +15,9 @@
   #define START_BUFFER_THRESHOLD 2400  // 0.6 seconds of ADPCM at 8 kHz
   #define MAX_START_BUFFER 12000    // Leave room for incoming packets
   #define SPEAKER_BYTES_PER_SECOND 4000      
-  #define STREAM_CLOSE_DELAY_MS 1500       
+  #define STREAM_FINISH_DRAIN_MS 700  // Flush last PCM and silent tail before amplifier shutdown
+  #define STREAM_IDLE_FAILSAFE_MS 30000 // Recover if phone disappears between sentences
+  #define SILENCE_PCM_SAMPLES 480     // 60 ms of silence at 8 kHz       
 #endif
 
 // =========================================================================
@@ -59,6 +61,8 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static bool s_speaker_open = false;           
   static bool s_ignore_audio = false;
   static bool s_sentence_ended = false;
+  static bool s_stream_finished = false;
+  static int16_t s_silence_pcm[SILENCE_PCM_SAMPLES]; // Static zero-initialized
   static uint32_t s_stream_id = 0;
   static int32_t s_expected_seq = 0;
   static uint32_t s_sentence_total = 0;
@@ -268,17 +272,28 @@ static void update_text_layout() {
     }
   }
 
-  static void schedule_close_timer() {
-    if (!s_stream_close_timer) {
-      s_stream_close_timer = app_timer_register(STREAM_CLOSE_DELAY_MS, delayed_close_callback, NULL); 
+  static void delayed_close_callback(void *data) {
+    s_stream_close_timer = NULL;
+    // The amplifier is held on for every gap within the response. Only
+    // shut down after the phone's final marker and the last PCM samples,
+    // or after a long connection-loss failsafe.
+    if (s_buffer_count == 0 && s_pending_pcm_offset == s_pending_pcm_bytes &&
+        s_speaker_open) {
+      if (s_playback_timer) {
+        app_timer_cancel(s_playback_timer);
+        s_playback_timer = NULL;
+      }
+      speaker_stream_close();
+      s_speaker_open = false;
+      set_status(NULL);
     }
   }
 
-  static void delayed_close_callback(void *data) {
-    s_stream_close_timer = NULL;                
-    if (s_buffer_count == 0 && s_speaker_open) { 
-      speaker_stream_close();                   
-      s_speaker_open = false;                   
+  static void schedule_close_timer() {
+    if (!s_stream_close_timer) {
+      s_stream_close_timer = app_timer_register(
+        s_stream_finished ? STREAM_FINISH_DRAIN_MS : STREAM_IDLE_FAILSAFE_MS,
+        delayed_close_callback, NULL);
     }
   }
 
@@ -346,15 +361,12 @@ static void update_text_layout() {
     }
 
     if (s_pending_pcm_offset == s_pending_pcm_bytes && s_buffer_count == 0) {
-      // Between consecutive sentences, or if Bluetooth slows, close and
-      // resume only after rebuilding a safety reservoir. The decoder's
-      // predictor stays intact so subsequent chunks remain continuous.
-      speaker_stream_close();
-      s_speaker_open = false;
-      s_rebuffering = true;
-      s_start_threshold = 4000;
-      set_status(NULL); // Never leave a permanent buffering label after playback.
-      return;
+      // Preserve amplifier power across sentence boundaries. Feed silence
+      // while waiting for the next synthesized sentence; otherwise an empty
+      // hardware FIFO can shut the amplifier off and make it pop on restart.
+      // The ADPCM predictor is untouched by these PCM silence samples.
+      schedule_close_timer();
+      speaker_stream_write((uint8_t*)s_silence_pcm, sizeof(s_silence_pcm));
     }
     s_playback_timer = app_timer_register(PLAYBACK_INTERVAL_MS, playback_timer_callback, NULL);
   }
@@ -380,6 +392,7 @@ static void update_text_layout() {
     s_tail = 0;                                 
     reset_adpcm_state();
     s_sentence_ended = false;
+    s_stream_finished = false;
     s_sentence_total = 0;
     s_sentence_received = 0;
     s_start_threshold = START_BUFFER_THRESHOLD;
@@ -539,6 +552,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
           s_ignore_audio = false;               
           reset_adpcm_state();
           s_sentence_ended = false;
+          s_stream_finished = false;
           s_sentence_received = 0;
           s_sentence_total = 0;
           s_expected_seq = 0;
@@ -560,7 +574,8 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   
   #ifdef PBL_SPEAKER
   else if (strcmp(command_tuple->value->cstring, "AUDIO_CHUNK") == 0 ||
-           strcmp(command_tuple->value->cstring, "AUDIO_SENTENCE_END") == 0) {
+           strcmp(command_tuple->value->cstring, "AUDIO_SENTENCE_END") == 0 ||
+           strcmp(command_tuple->value->cstring, "AUDIO_STREAM_END") == 0) {
     Tuple *id_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
     Tuple *seq_tuple = dict_find(iterator, MESSAGE_KEY_SEQ);
     if (!id_tuple || !seq_tuple || (uint32_t)id_tuple->value->int32 != s_stream_id || s_ignore_audio) return;
@@ -602,13 +617,23 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       s_expected_seq++;
       send_audio_reply("AUDIO_ACK", sequence);
       maybe_start_playback();
-    } else {
+    } else if (strcmp(command_tuple->value->cstring, "AUDIO_SENTENCE_END") == 0) {
       s_sentence_ended = true;
       s_sentence_total = 0;
       s_sentence_received = 0;
       s_expected_seq++;
       send_audio_reply("AUDIO_ACK", sequence);
       maybe_start_playback();
+    } else { // AUDIO_STREAM_END: every sentence has arrived.
+      s_sentence_ended = true;
+      s_stream_finished = true;
+      s_expected_seq++;
+      send_audio_reply("AUDIO_ACK", sequence);
+      // A previously scheduled idle failsafe is replaced with the shorter
+      // final-drain timer once queued PCM has actually been played.
+      cancel_close_timer();
+      if (!s_speaker_open && s_buffer_count > 0) maybe_start_playback();
+      if (!s_speaker_open && s_buffer_count == 0) set_status(NULL);
     }
   } else if (strcmp(command_tuple->value->cstring, "AUDIO_ERROR") == 0) {
     Tuple *id_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
