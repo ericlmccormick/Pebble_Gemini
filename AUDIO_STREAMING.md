@@ -40,3 +40,27 @@ This tests WAV decoding, ADPCM output length, packet ordering, duplicate/stale a
 8. Test emoji/accented responses for valid UTF-8 watch messages.
 
 **Known limits:** This is an implementation branch. No Pebble SDK compilation, physical speaker/BLE throughput testing, or deployment to CloudPebble has been performed here. The latest hardware speaker API confirms that stream writes can be partial, which the current watch code handles.
+
+## Release-hardening additions (1.5.0)
+
+- **Conversation retention:** Only the last three complete user/model turns are retained, with an additional 8,000-character storage budget. Malformed and incomplete saved conversations are ignored.
+- **Conversation deletion:** Settings > Conversation & Privacy > Clear Conversation History on Save. This deletes saved Q&A content without removing API keys or voice preferences.
+- **Network failures:** Gemini requests expire after 30 seconds, and each TTS request after 20 seconds. Errors identify missing permissions/API keys, quotas, and timeouts without exposing credentials.
+- **Privacy and billing:** Prompts and conversation context are submitted to the Gemini API; text from answers is sent to Google Cloud TTS when voice is enabled. API keys and saved conversation context are kept in PebbleKit localStorage, not explicitly encrypted by this app. Costs depend on the Google services and selected voice family.
+- **Lifecycle:** The spinner stops when leaving the thinking screen and on window unload; volume timers are canceled, and speaker playback is reset when a new answer arrives.
+- **Version consistency:** Both package version and pebble.version are 1.5.0.
+- **CI:** `.github/workflows/js-tests.yml` runs Node syntax checks and the regression script on push and pull requests.
+
+### Required manual release checks
+
+1. CloudPebble: import/update **both** `src/pkjs/index.js` and `src/c/main.c`, along with `package.json`. Confirm the generated message key IDs match the new protocol.
+2. Compile all platforms listed in `package.json` (basalt, chalk, diorite, emery) using CloudPebble or Pebble SDK; review warnings and memory usage. This is **not yet verified** by the regression tests.
+3. On a speaker-equipped watch, test short and long answers, early playback, TTS cost tiers, multiple sentences, and interruption during streaming.
+4. On a nonspeaker watch, verify text-only mode and readable results.
+5. Force a network outage and a rate-limited or invalid-key response; verify the displayed errors are understandable and do not delete prior history.
+6. Clear conversation via settings, reopen settings, verify history stays cleared and API keys are unchanged; then ask a question.
+7. Test settings changes while audio is in progress, and long answers containing emoji/accented characters.
+
+### Release decision
+
+Do not merge the draft PR or publish until the SDK builds and on-watch smoke test are satisfactory. Tests cover the protocol simulation and JavaScript behavior but **not** the actual Bluetooth stack, native speaker driver, or SDK platform headers.
