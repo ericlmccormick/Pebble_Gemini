@@ -82,8 +82,22 @@ assert.equal(sent[2].CHUNK.length,80);
 api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:314, SEQ:2});
 assert.equal(sent[3].COMMAND,'AUDIO_SENTENCE_END');
 api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:314, SEQ:3});
+assert.equal(sent[4].COMMAND, 'AUDIO_STREAM_END', 'final marker must follow last sentence');
+assert.equal(sent[4].SEQ, 4);
+assert.equal(api.state().sending,true, 'final marker requires watch acknowledgment');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:314, SEQ:4});
 assert.equal(api.state().sending,false);
 assert.equal(api.state().active,null);
+
+// Two sentences: never shut down after the first sentence boundary.
+api.seed(Array.from({length:20}, (_,i)=>i));
+api.start(1,316);
+const secondBegin = sent.length;
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:5});
+assert.equal(sent[secondBegin].COMMAND, 'AUDIO_SENTENCE_END');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:6});
+assert.equal(sent[secondBegin + 1].COMMAND, 'AUDIO_STREAM_END');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:7});
 
 api.seed([1,2,3]);
 api.start(1,315);
@@ -129,6 +143,6 @@ async function checkNetwork() {
   const job = scheduled[scheduled.length - 1];
   job.fn();
   await assert.rejects(pending, /timed out/);
-  console.log('PASS: WAV, ADPCM, protocol, voice migration, history privacy, timeouts, settings');
+  console.log('PASS: WAV, ADPCM, protocol, final stream marker, voice migration, history privacy, timeouts, settings');
 }
 checkNetwork().catch(error => { console.error(error); process.exitCode = 1; });
