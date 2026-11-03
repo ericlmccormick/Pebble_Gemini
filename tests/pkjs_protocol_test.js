@@ -48,6 +48,14 @@ this.testAPI = {
   state: function() { return {seq:currentAudioSeq,active:activeTransfer, sending:isSendingBLE, generation:requestGeneration}; }
 };`, context);
 const api = context.testAPI;
+assert.equal(context.platformHasSpeaker('emery'), true, 'Time 2 should retain spoken responses');
+assert.equal(context.platformHasSpeaker('gabbro'), false, 'Round 2 must stay text-only');
+assert.equal(context.platformHasSpeaker('basalt'), false);
+assert.equal(context.platformHasSpeaker('chalk'), false);
+assert.equal(context.platformHasSpeaker('diorite'), false);
+assert.equal(context.platformHasSpeaker('flint'), false, 'Flint support requires a separate validated native build');
+assert.equal(context.platformHasSpeaker(undefined), false);
+
 // Guard against the playback regression that queued silence directly
 // behind newly written PCM and made small pauses (e.g. commas) choppy.
 const watchC = fs.readFileSync(path.join(__dirname, '..', 'src', 'c', 'main.c'), 'utf8');
