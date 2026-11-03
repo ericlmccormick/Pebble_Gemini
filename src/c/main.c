@@ -17,7 +17,7 @@
   #define SPEAKER_BYTES_PER_SECOND 4000      
   #define STREAM_FINISH_DRAIN_MS 700  // Flush last PCM and silent tail before amplifier shutdown
   #define STREAM_IDLE_FAILSAFE_MS 30000 // Recover if phone disappears between sentences
-  #define SILENCE_PCM_SAMPLES 320     // 40 ms of silence at 8 kHz       
+  #define SILENCE_PCM_SAMPLES 240     // 30 ms, less than the 35-ms tick to avoid accumulating silent backlog       
 #endif
 
 // =========================================================================
