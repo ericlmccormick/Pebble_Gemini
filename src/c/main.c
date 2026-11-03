@@ -669,6 +669,13 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         s_sentence_count++;
         s_sentence_total = length;
       }
+      // Prevent malformed or out-of-order sizes from crossing a sentence
+      // boundary. The sender repeats the same packet after AUDIO_WAIT.
+      if ((uint32_t)chunk_tuple->length > s_sentence_total - s_sentence_received) {
+        APP_LOG(APP_LOG_LEVEL_WARNING, "Audio packet exceeds sentence length");
+        send_audio_reply("AUDIO_WAIT", sequence);
+        return;
+      }
       // Keep re-evaluating only the sentence that is currently filling;
       // later packets provide better throughput estimates than the first.
       if (s_sentence_count && hint_tuple && s_sentence_total) {
