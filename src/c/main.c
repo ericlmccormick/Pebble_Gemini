@@ -64,7 +64,7 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static uint32_t s_sentence_total = 0;
   static uint32_t s_sentence_received = 0;
   static uint32_t s_start_threshold = START_BUFFER_THRESHOLD;
-  static bool s_waiting_for_audio = true;
+  static bool s_rebuffering = false;
   static int16_t s_pending_pcm[PLAYBACK_PCM_SAMPLES];
   static uint32_t s_pending_pcm_bytes = 0;
   static uint32_t s_pending_pcm_offset = 0;           
@@ -301,7 +301,8 @@ static void update_text_layout() {
         if (!s_start_retry_timer) s_start_retry_timer = app_timer_register(120, start_retry_callback, NULL);
         return;
       }
-      s_speaker_open = true;                    
+      s_speaker_open = true;
+      s_rebuffering = false;                    
     }
 
     if (!s_playback_timer) {                     
@@ -347,7 +348,7 @@ static void update_text_layout() {
       // predictor stays intact so subsequent chunks remain continuous.
       speaker_stream_close();
       s_speaker_open = false;
-      s_waiting_for_audio = true;
+      s_rebuffering = true;
       s_start_threshold = 4000;
       set_status("Buffering audio...");
       return;
@@ -379,7 +380,7 @@ static void update_text_layout() {
     s_sentence_total = 0;
     s_sentence_received = 0;
     s_start_threshold = START_BUFFER_THRESHOLD;
-    s_waiting_for_audio = true;
+    s_rebuffering = false;
     set_status(NULL);                           
   }
 
@@ -532,7 +533,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
           s_sentence_total = 0;
           s_expected_seq = 0;
           s_start_threshold = START_BUFFER_THRESHOLD;
-          s_waiting_for_audio = true;
+          s_rebuffering = false;
           Tuple *stream_tuple = dict_find(iterator, MESSAGE_KEY_STREAM_ID);
           if (stream_tuple) s_stream_id = (uint32_t)stream_tuple->value->int32;
           if (s_volume > 0.01f) {
@@ -581,7 +582,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       if (!s_speaker_open && s_sentence_total > 0) {
         uint32_t link_rate = hint_tuple ? (uint32_t)hint_tuple->value->int32 : 5200;
         uint32_t threshold = choose_start_threshold(s_sentence_total, link_rate);
-        if (s_waiting_for_audio && threshold < 4000 && s_sentence_received > 0)
+        if (s_rebuffering && threshold < 4000)
           threshold = 4000; // Recovery hysteresis after an underrun.
         s_start_threshold = threshold;
       }
