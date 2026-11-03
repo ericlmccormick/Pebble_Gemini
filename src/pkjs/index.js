@@ -16,22 +16,25 @@ var customPersona = localStorage.getItem("CUSTOM_PERSONA") || "";
 // Restore dynamic dropdown configurations with updated default
 var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.8-flash"; 
 // Migrate legacy Chirp3 aliases, which never existed in Google's TTS catalog.
-var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Journey-F";
+var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Wavenet-F";
 var TTS_VOICE_ALIASES = {
   "en-US-Chirp3-HD-F": "en-US-Chirp3-HD-Kore",
-  "en-US-Chirp3-HD-M": "en-US-Chirp3-HD-Charon"
+  "en-US-Chirp3-HD-M": "en-US-Chirp3-HD-Charon",
+  "en-US-Studio-O": "en-US-Wavenet-F",
+  "en-US-Studio-M": "en-US-Wavenet-D",
+  "en-US-Journey-F": "en-US-Wavenet-F",
+  "en-US-Journey-D": "en-US-Wavenet-D"
 };
 var SUPPORTED_TTS_VOICES = [
-  "en-US-Journey-F", "en-US-Journey-D",
+  "en-US-Wavenet-C", "en-US-Wavenet-D", "en-US-Wavenet-F",
+  "en-US-Neural2-C", "en-US-Neural2-D", "en-US-Neural2-F",
   "en-US-Chirp3-HD-Kore", "en-US-Chirp3-HD-Aoede",
   "en-US-Chirp3-HD-Leda", "en-US-Chirp3-HD-Zephyr",
-  "en-US-Chirp3-HD-Charon", "en-US-Chirp3-HD-Puck",
-  "en-US-Studio-O", "en-US-Studio-M",
-  "en-US-Neural2-C", "en-US-Neural2-D"
+  "en-US-Chirp3-HD-Charon", "en-US-Chirp3-HD-Puck"
 ];
 function normalizeTtsVoice(name) {
   var migrated = TTS_VOICE_ALIASES[name] || name;
-  return SUPPORTED_TTS_VOICES.indexOf(migrated) >= 0 ? migrated : "en-US-Journey-F";
+  return SUPPORTED_TTS_VOICES.indexOf(migrated) >= 0 ? migrated : "en-US-Wavenet-F";
 }
 ttsVoice = normalizeTtsVoice(ttsVoice);
 localStorage.setItem("TTS_VOICE", ttsVoice);        
@@ -198,27 +201,30 @@ var advancedSettingsItems = [
 
 if (hasSpeaker) {
   advancedSettingsItems.push({
-    "type": "select", 
+    "type": "select",
     "messageKey": "TTS_VOICE",
-    "label": "Google TTS Voice",
+    "label": "Google TTS Voice (cost tiers)",
     "defaultValue": ttsVoice,
-    "description": "Select the assistant's voice profile. Default is Journey Female.",
-    "options": [ 
-      { "label": "Journey Female (Default)", "value": "en-US-Journey-F" },
-      { "label": "Journey Male", "value": "en-US-Journey-D" },
-      { "label": "Chirp 3 HD Kore (Female)", "value": "en-US-Chirp3-HD-Kore" },
-      { "label": "Chirp 3 HD Aoede (Female)", "value": "en-US-Chirp3-HD-Aoede" },
-      { "label": "Chirp 3 HD Leda (Female)", "value": "en-US-Chirp3-HD-Leda" },
-      { "label": "Chirp 3 HD Zephyr (Female)", "value": "en-US-Chirp3-HD-Zephyr" },
-      { "label": "Chirp 3 HD Charon (Male)", "value": "en-US-Chirp3-HD-Charon" },
-      { "label": "Chirp 3 HD Puck (Male)", "value": "en-US-Chirp3-HD-Puck" },
-      { "label": "Studio Female", "value": "en-US-Studio-O" },
-      { "label": "Studio Male", "value": "en-US-Studio-M" },
-      { "label": "Neural2 Female", "value": "en-US-Neural2-C" },
-      { "label": "Neural2 Male", "value": "en-US-Neural2-D" }
+    "description": "WaveNet $ = low cost; Neural2 $$ = medium; Chirp 3 HD $$$ = highest. Billing is based on generated characters, not a one-time fee.",
+    "options": [
+      { "label": "WaveNet F - Female ($, default)", "value": "en-US-Wavenet-F" },
+      { "label": "WaveNet C - Female ($)", "value": "en-US-Wavenet-C" },
+      { "label": "WaveNet D - Male ($)", "value": "en-US-Wavenet-D" },
+      { "label": "Neural2 C - Female ($$)", "value": "en-US-Neural2-C" },
+      { "label": "Neural2 F - Female ($$)", "value": "en-US-Neural2-F" },
+      { "label": "Neural2 D - Male ($$)", "value": "en-US-Neural2-D" },
+      { "label": "Chirp 3 HD Kore - Female ($$$)", "value": "en-US-Chirp3-HD-Kore" },
+      { "label": "Chirp 3 HD Aoede - Female ($$$)", "value": "en-US-Chirp3-HD-Aoede" },
+      { "label": "Chirp 3 HD Leda - Female ($$$)", "value": "en-US-Chirp3-HD-Leda" },
+      { "label": "Chirp 3 HD Zephyr - Female ($$$)", "value": "en-US-Chirp3-HD-Zephyr" },
+      { "label": "Chirp 3 HD Charon - Male ($$$)", "value": "en-US-Chirp3-HD-Charon" },
+      { "label": "Chirp 3 HD Puck - Male ($$$)", "value": "en-US-Chirp3-HD-Puck" }
     ]
   });
-
+  advancedSettingsItems.push({
+    "type": "text",
+    "defaultValue": "Relative TTS cost per 1M characters after Google's monthly free allowance: WaveNet $ ($4); Neural2 $$ ($16); Chirp 3 HD $$$ ($30). Studio voices removed. Charges depend on usage and Google's current pricing."
+  });
   advancedSettingsItems.push({
     "type": "text",
     "defaultValue": "Audio: 8 kHz PCM16 playback with 4-bit IMA-ADPCM streaming. The previous 16 kHz / 8-bit modes were not supported by the watch decoder."
@@ -419,7 +425,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
   }
 
   if (settings.TTS_VOICE) {
-    ttsVoice = normalizeTtsVoice(settings.TTS_VOICE.value || "en-US-Journey-F"); 
+    ttsVoice = normalizeTtsVoice(settings.TTS_VOICE.value || "en-US-Wavenet-F"); 
     localStorage.setItem("TTS_VOICE", ttsVoice); 
   }
 
@@ -654,7 +660,7 @@ function startTTSFetchLoop(generation, streamId) {
   var sentence = sentenceQueue.shift();
   var url = 'https://texttospeech.googleapis.com/v1/text:synthesize?key=' + ttsApiKey;
   var primaryVoice = normalizeTtsVoice(ttsVoice);
-  var fallbackVoice = "en-US-Journey-F";
+  var fallbackVoice = "en-US-Wavenet-F";
 
   function synthesize(voiceName, fallbackAttempt) {
     var audioConfig = { audioEncoding: 'LINEAR16', sampleRateHertz: 8000 };
@@ -675,7 +681,7 @@ function startTTSFetchLoop(generation, streamId) {
       if (!data.audioContent) {
         var apiError = new Error(data.error && data.error.message || 'No TTS audio');
         if (!fallbackAttempt && voiceName !== fallbackVoice && isInvalidVoiceError(apiError)) {
-          console.log('Invalid selected voice; retrying with Journey-F');
+          console.log('Invalid selected voice; retrying with WaveNet-F');
           ttsVoice = fallbackVoice;
           localStorage.setItem("TTS_VOICE", fallbackVoice);
           return synthesize(fallbackVoice, true);
