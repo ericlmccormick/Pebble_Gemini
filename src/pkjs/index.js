@@ -57,10 +57,10 @@ try {
       hasSpeaker = true;    
     }
   } else {
-    hasSpeaker = true;      
+    hasSpeaker = false; // Unknown watch: favor reliable text-only behavior.
   }
 } catch (err) {
-  hasSpeaker = true;        
+  hasSpeaker = false;        
 }
 
 // =========================================================================
@@ -686,7 +686,14 @@ function handleAudioAck(dict) {
   if (Number(dict.STREAM_ID) !== t.streamId || Number(dict.SEQ) !== t.seq) return;
   if (t.timer) { clearTimeout(t.timer); t.timer = null; }
   if (dict.COMMAND === 'AUDIO_WAIT') {
-    // Full buffer: do not flood the watch. Retry the same sequence after playback drains.
+    // Bound a hardware or connection fault that never frees its ring buffer.
+    t.waits = (t.waits || 0) + 1;
+    if (t.waits > 75) {
+      console.log('Audio buffer did not drain');
+      cancelCurrentAudio();
+      Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:t.streamId });
+      return;
+    }
     t.attempts = 0;
     t.timer = setTimeout(function() { sendPendingPacket(t); }, 180);
     return;
