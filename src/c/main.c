@@ -11,7 +11,7 @@
   #define PERSIST_KEY_VOLUME 100           
   #define PLAYBACK_ADPCM_BYTES 800         
   #define PLAYBACK_PCM_SAMPLES (PLAYBACK_ADPCM_BYTES * 2) 
-  #define PLAYBACK_INTERVAL_MS 200         
+  #define PLAYBACK_INTERVAL_MS 60 // Retry hardware writes frequently without overfilling speaker FIFO         
   #define START_BUFFER_THRESHOLD 2400  // 0.6 seconds of ADPCM at 8 kHz
   #define MAX_START_BUFFER 12000    // Leave room for incoming packets
   #define SPEAKER_BYTES_PER_SECOND 4000      
@@ -63,7 +63,10 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static uint32_t s_sentence_total = 0;
   static uint32_t s_sentence_received = 0;
   static uint32_t s_start_threshold = START_BUFFER_THRESHOLD;
-  static bool s_waiting_for_audio = true;           
+  static bool s_waiting_for_audio = true;
+  static int16_t s_pending_pcm[PLAYBACK_PCM_SAMPLES];
+  static uint32_t s_pending_pcm_bytes = 0;
+  static uint32_t s_pending_pcm_offset = 0;           
 
   static const int16_t stepTable[89] = {
     7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,
@@ -300,44 +303,45 @@ static void update_text_layout() {
 
   static void playback_timer_callback(void *data) {
     s_playback_timer = NULL;
-    if (!s_speaker_open) return;                
+    if (!s_speaker_open) return;
 
-    static int16_t s_out_buf[PLAYBACK_PCM_SAMPLES]; 
-
-    // A final sentence may contain fewer than 800 ADPCM bytes.
-    // Previously that tail could be trapped forever while silence was played.
-    uint32_t bytes_to_play = s_buffer_count >= PLAYBACK_ADPCM_BYTES
-                           ? PLAYBACK_ADPCM_BYTES
-                           : (s_sentence_ended ? s_buffer_count : 0);
-    if (bytes_to_play > 0) {
-      memset(s_out_buf, 0, sizeof(s_out_buf));
-      for (uint32_t i = 0; i < bytes_to_play; i++) { 
-        uint8_t adpcm_byte = s_ring_buffer[s_head]; 
-        s_head = (s_head + 1) % RING_BUFFER_SIZE; 
-        s_buffer_count--;                       
-
-        uint8_t nibble1 = (adpcm_byte >> 4) & 0x0F; 
-        uint8_t nibble2 = adpcm_byte & 0x0F;        
-
-        s_out_buf[i * 2] = decode_adpcm_to_16bit(nibble1);     
-        s_out_buf[(i * 2) + 1] = decode_adpcm_to_16bit(nibble2); 
+    // The hardware can accept fewer PCM bytes than requested. Keep the
+    // unsent tail instead of silently losing it and decoding the next block.
+    if (s_pending_pcm_offset == s_pending_pcm_bytes) {
+      s_pending_pcm_offset = 0;
+      s_pending_pcm_bytes = 0;
+      uint32_t available = s_buffer_count >= PLAYBACK_ADPCM_BYTES ?
+                           PLAYBACK_ADPCM_BYTES : (s_sentence_ended ? s_buffer_count : 0);
+      if (available > 0) {
+        for (uint32_t i = 0; i < available; i++) {
+          uint8_t encoded = s_ring_buffer[s_head];
+          s_head = (s_head + 1) % RING_BUFFER_SIZE;
+          s_buffer_count--;
+          s_pending_pcm[i * 2] = decode_adpcm_to_16bit((encoded >> 4) & 15);
+          s_pending_pcm[i * 2 + 1] = decode_adpcm_to_16bit(encoded & 15);
+        }
+        s_pending_pcm_bytes = available * 4;
+        if (s_buffer_count == 0) s_sentence_ended = false;
       }
-      speaker_stream_write((uint8_t*)s_out_buf, sizeof(s_out_buf));
-      if (s_buffer_count == 0) s_sentence_ended = false;
-    } else {
-      // Do not endlessly write silence when BLE falls behind playback.
-      // Pause and refill instead; the predictor is preserved across pauses.
-      if (!s_sentence_ended) {
-        speaker_stream_close();
-        s_speaker_open = false;
-        s_waiting_for_audio = true;
-        s_start_threshold = 4000; // 1 second reserve after an underrun.
-        set_status("Rebuffering audio...");
-        return;
-      }
+    }
+
+    if (s_pending_pcm_offset < s_pending_pcm_bytes) {
+      uint32_t remaining = s_pending_pcm_bytes - s_pending_pcm_offset;
+      uint32_t written = speaker_stream_write(
+        ((uint8_t*)s_pending_pcm) + s_pending_pcm_offset, remaining);
+      if (written > remaining) written = remaining;
+      s_pending_pcm_offset += written;
+    }
+
+    if (s_pending_pcm_offset == s_pending_pcm_bytes && s_buffer_count == 0) {
+      // Between consecutive sentences, or if Bluetooth slows, close and
+      // resume only after rebuilding a safety reservoir. The decoder's
+      // predictor stays intact so subsequent chunks remain continuous.
       speaker_stream_close();
       s_speaker_open = false;
       s_waiting_for_audio = true;
+      s_start_threshold = 4000;
+      set_status("Buffering audio...");
       return;
     }
     s_playback_timer = app_timer_register(PLAYBACK_INTERVAL_MS, playback_timer_callback, NULL);
@@ -353,7 +357,9 @@ static void update_text_layout() {
       s_playback_timer = NULL;                  
     }
     cancel_close_timer();                       
-    s_buffer_count = 0;                         
+    s_buffer_count = 0;
+    s_pending_pcm_bytes = 0;
+    s_pending_pcm_offset = 0;
     s_head = 0;                                 
     s_tail = 0;                                 
     reset_adpcm_state();
@@ -393,12 +399,6 @@ static void select_short_click_handler(ClickRecognizerRef recognizer, void *cont
     stop_audio();                               
   }
   #endif
-  // Invalidate any phone-side transfer as soon as the user starts a new query.
-  DictionaryIterator *cancel_iter = NULL;
-  if (app_message_outbox_begin(&cancel_iter) == APP_MSG_OK && cancel_iter) {
-    dict_write_cstring(cancel_iter, MESSAGE_KEY_COMMAND, "AUDIO_CANCEL");
-    app_message_outbox_send();
-  }
   dictation_session_start(s_dictation_session); 
 }
 
