@@ -574,8 +574,16 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       Tuple *hint_tuple = dict_find(iterator, MESSAGE_KEY_BUFFER_HINT);
       if (s_sentence_received == 0 && total_tuple) {
         s_sentence_total = (uint32_t)total_tuple->value->int32;
+      }
+      // Re-evaluate the required startup reservoir as the phone measures
+      // actual BLE throughput; start early on fast links and wait longer
+      // when the link cannot replenish the buffer as quickly as audio plays.
+      if (!s_speaker_open && s_sentence_total > 0) {
         uint32_t link_rate = hint_tuple ? (uint32_t)hint_tuple->value->int32 : 5200;
-        s_start_threshold = choose_start_threshold(s_sentence_total, link_rate);
+        uint32_t threshold = choose_start_threshold(s_sentence_total, link_rate);
+        if (s_waiting_for_audio && threshold < 4000 && s_sentence_received > 0)
+          threshold = 4000; // Recovery hysteresis after an underrun.
+        s_start_threshold = threshold;
       }
       s_sentence_ended = false;
       push_to_ring_buffer(chunk_tuple->value->data, chunk_tuple->length);
