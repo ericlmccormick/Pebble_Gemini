@@ -84,3 +84,18 @@ The watch now treats each spoken answer as **one speaker session**, even though 
 4. Verify the final sentence is not truncated, and that the 700-ms silent tail does not produce an audible extra word or a prolonged hum.
 
 The Node CI suite checks phone-side final-marker sequencing. Actual amplifier behavior must be validated on Pebble hardware.
+
+## PCM pacing fix for comma/phrase stutters
+
+Keeping the amplifier continuously active revealed a separate scheduling issue: the watch previously decoded 800 ADPCM bytes (200 ms of speech) and immediately appended silence on a transient empty compressed ring. The hardware could have already queued real PCM, so silence was inadvertently inserted *before the next spoken words*, exaggerating ordinary comma pauses.
+
+The playback loop now:
+- Decodes **up to 160 ADPCM bytes (40 ms)** at a time, even if the current sentence has not reached its end marker.
+- Calls the speaker on a **35-ms refill interval**, retaining any unwritten partial PCM for the next attempt.
+- Only writes keep-alive silence on a tick when **neither pending PCM nor compressed bytes are available**.
+- Uses **30-ms silence frames** so they do not accumulate in the speaker FIFO faster than the 35-ms timer interval.
+- Keeps the amplifier open across all sentences until the acknowledged `AUDIO_STREAM_END` plus its final drain period.
+
+This specifically reduces artificial pauses caused by buffering and silence insertion; punctuation pauses naturally present in the synthesized speech remain unchanged. The 16-KB compressed ring, sequenced ACK transport, adaptive *initial* buffering and explicit final amp shutdown are preserved.
+
+On-device regression check: have Gemini say a long sentence with several commas (no periods) followed by multiple sentences. Check that commas sound natural, syllables do not break up, there are no between-sentence pops, and the final word is complete.
