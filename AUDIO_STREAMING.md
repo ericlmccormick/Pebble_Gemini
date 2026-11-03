@@ -64,3 +64,23 @@ This tests WAV decoding, ADPCM output length, packet ordering, duplicate/stale a
 ### Release decision
 
 Do not merge the draft PR or publish until the SDK builds and on-watch smoke test are satisfactory. Tests cover the protocol simulation and JavaScript behavior but **not** the actual Bluetooth stack, native speaker driver, or SDK platform headers.
+
+## Continuous amplifier session (1.5.0 audio-pop fix)
+
+The watch now treats each spoken answer as **one speaker session**, even though synthesis and Bluetooth transfer are divided into multiple sentences.
+
+- `AUDIO_SENTENCE_END` marks a sentence's tail for decoding, but **does not close the speaker**.
+- When the audio ring becomes empty while the phone is preparing another sentence, the watch sends zero-valued PCM to the already-open speaker. This keeps the hardware stream active and reduces amp power-cycling pops between sentences.
+- Only after all TTS requests have completed, all audio chunks and sentence boundaries have been acknowledged, the phone sends a sequenced `AUDIO_STREAM_END` marker. The watch keeps playing until its compressed ring and pending decoded PCM are empty, then outputs a brief silent tail before calling `speaker_stream_close()`.
+- If the phone disappears mid-answer, an approximately 30-second idle failsafe prevents the amplifier remaining powered indefinitely. A new answer or manual stop still closes the old session immediately.
+- The end marker follows the existing session ID, sequence number, and ACK/retry protocol; it is not sent at every sentence boundary.
+- **Tradeoff:** Keeping the speaker open consumes more power during inter-sentence TTS pauses. This is intentional, and the added idle failsafe bounds that cost.
+
+### Targeted watch checks
+
+1. Play a 4–5 sentence answer with noticeable synthesis gaps. Listen for no click/pop between sentences and verify the speaker closes after the entire response.
+2. Ask another question immediately afterward, and interrupt one answer with the Select button.
+3. Disconnect Bluetooth between sentences, then reconnect. Verify the amplifier does not turn off during the normal pause, and the idle failsafe eventually releases it if the phone never resumes.
+4. Verify the final sentence is not truncated, and that the 700-ms silent tail does not produce an audible extra word or a prolonged hum.
+
+The Node CI suite checks phone-side final-marker sequencing. Actual amplifier behavior must be validated on Pebble hardware.
