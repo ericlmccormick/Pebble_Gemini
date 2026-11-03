@@ -68,7 +68,7 @@ function trimConversationHistory(items) {
     var user = items[i], model = items[i + 1];
     if (user && model && user.role === 'user' && model.role === 'model' &&
         Array.isArray(user.parts) && Array.isArray(model.parts) &&
-        typeof user.parts[0]?.text === 'string' && typeof model.parts[0]?.text === 'string') {
+        user.parts[0] && model.parts[0] && typeof user.parts[0].text === 'string' && typeof model.parts[0].text === 'string') {
       pairs.push([user, model]); i++;
     }
   }
@@ -134,7 +134,7 @@ function requestJsonWithTimeout(url, options, timeoutMs) {
     try {
       fetch(url, options).then(function(response) {
         return response.json().then(function(data) {
-          if (!response.ok && !data.error) data.error = {message: 'HTTP ' + response.status};
+          if (response.ok === false && !data.error) data.error = {message: 'HTTP ' + response.status};
           return data;
         });
       }).then(function(data) {
