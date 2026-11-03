@@ -55,8 +55,8 @@ assert.match(watchC, /#define PLAYBACK_ADPCM_BYTES 160\b/, 'decode should use sh
 assert.match(watchC, /#define PLAYBACK_INTERVAL_MS 35\b/, 'short refills should be paced');
 assert.match(watchC, /#define SILENCE_PCM_SAMPLES 240\b/, 'silence must not accumulate faster than hardware drains');
 const playbackSection = watchC.split('static void playback_timer_callback(void *data) {').pop().split('static void stop_audio() {')[0];
-assert.match(playbackSection, /if \(s_pending_pcm_offset < s_pending_pcm_bytes\)[\s\S]+else if \(s_buffer_count == 0\)/,
-  'silence should only be written on truly empty playback ticks');
+assert.match(playbackSection, /if \(s_pending_pcm_offset < s_pending_pcm_bytes\)[\s\S]+else if \(s_pending_pcm_offset == s_pending_pcm_bytes\)/,
+  'silence must only be sent when no decoded PCM remains; compressed bytes may be gated for next sentence');
 assert.doesNotMatch(playbackSection, /s_buffer_count >= PLAYBACK_ADPCM_BYTES[\s\S]+s_sentence_ended \?/, 
   'small buffered audio tails must play before a sentence-end marker');
 // Sentence-gate regression: subsequent sentences require their own reservoir,
