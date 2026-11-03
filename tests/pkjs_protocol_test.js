@@ -92,4 +92,43 @@ api.cancel();
 api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:315, SEQ:oldSeq});
 assert.equal(api.state().active,null);
 assert.equal(api.state().generation,2);
-console.log('PASS: WAV, ADPCM, sequencing, duplicate/old ACKs, cancellation, TTS voice migration');
+// Release-hardening tests: bounded storage, settings reset, error classification,
+// timeout handling, and continued access to saved API keys.
+const pair = text => [
+  { role: 'user', parts: [{ text: text }] },
+  { role: 'model', parts: [{ text: text + ' response' }] }
+];
+let history = [];
+for (let i = 0; i < 10; i++) history = history.concat(pair('question '+i));
+const trimmed = context.trimConversationHistory(history);
+assert.equal(trimmed.length, 6);
+assert.equal(trimmed[0].parts[0].text, 'question 7');
+assert.equal(context.trimConversationHistory([{role:'user',parts:[{text:'unpaired'}]}]).length, 0);
+assert.equal(context.trimConversationHistory('garbled').length, 0);
+const previousSettings = {GEMINI_API_KEY:'key-one', TTS_API_KEY:'key-two', CHAT_HISTORY:JSON.stringify(trimmed)};
+Object.assign(storage, previousSettings);
+listeners.webviewclosed({
+  response: encodeURIComponent(JSON.stringify({
+    CLEAR_HISTORY: {value:true},
+    FONT_SIZE: {value:24}
+  }))
+});
+assert.equal(storage.CHAT_HISTORY, '[]');
+assert.equal(storage.GEMINI_API_KEY, 'key-one');
+assert.equal(storage.TTS_API_KEY, 'key-two');
+assert.equal(context.apiErrorMessage(Error('Request timed out'), 'Gemini'), 'Gemini timed out. Try again.');
+assert.match(context.apiErrorMessage(Error('HTTP 429 quota'), 'Gemini'), /usage limit/);
+assert.match(context.apiErrorMessage(Error('unauthenticated'), 'Gemini'), /key\/access/);
+
+async function checkNetwork() {
+  context.fetch = () => Promise.resolve({ ok:true, json:()=>Promise.resolve({answer:'ok'}) });
+  const ok = await context.requestJsonWithTimeout('test', {}, 1000);
+  assert.equal(ok.answer, 'ok');
+  context.fetch = () => new Promise(()=>{});
+  const pending = context.requestJsonWithTimeout('test', {}, 1000);
+  const job = scheduled[scheduled.length - 1];
+  job.fn();
+  await assert.rejects(pending, /timed out/);
+  console.log('PASS: WAV, ADPCM, protocol, voice migration, history privacy, timeouts, settings');
+}
+checkNetwork().catch(error => { console.error(error); process.exitCode = 1; });
