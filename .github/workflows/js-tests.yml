@@ -1,0 +1,21 @@
+name: Pebble Gemini JS regression tests
+
+on:
+  push:
+    branches: [main, gemini-reliability-review-2026-11-03]
+  pull_request:
+
+jobs:
+  protocol-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate source syntax
+        run: |
+          node --check src/pkjs/index.js
+          node --check tests/pkjs_protocol_test.js
+      - name: Test audio protocol and release hardening
+        run: node tests/pkjs_protocol_test.js
