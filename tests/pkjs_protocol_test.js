@@ -51,13 +51,13 @@ const api = context.testAPI;
 // Guard against the playback regression that queued silence directly
 // behind newly written PCM and made small pauses (e.g. commas) choppy.
 const watchC = fs.readFileSync(path.join(__dirname, '..', 'src', 'c', 'main.c'), 'utf8');
-assert.match(watchC, /#define PLAYBACK_ADPCM_BYTES 160\\b/, 'decode should use short 40-ms blocks');
-assert.match(watchC, /#define PLAYBACK_INTERVAL_MS 35\\b/, 'short refills should be paced');
-assert.match(watchC, /#define SILENCE_PCM_SAMPLES 240\\b/, 'silence must not accumulate faster than hardware drains');
+assert.match(watchC, /#define PLAYBACK_ADPCM_BYTES 160\b/, 'decode should use short 40-ms blocks');
+assert.match(watchC, /#define PLAYBACK_INTERVAL_MS 35\b/, 'short refills should be paced');
+assert.match(watchC, /#define SILENCE_PCM_SAMPLES 240\b/, 'silence must not accumulate faster than hardware drains');
 const playbackSection = watchC.split('static void playback_timer_callback(void *data) {').pop().split('static void stop_audio() {')[0];
-assert.match(playbackSection, /if \\(s_pending_pcm_offset < s_pending_pcm_bytes\\)[\\s\\S]+else if \\(s_buffer_count == 0\\)/,
+assert.match(playbackSection, /if \(s_pending_pcm_offset < s_pending_pcm_bytes\)[\s\S]+else if \(s_buffer_count == 0\)/,
   'silence should only be written on truly empty playback ticks');
-assert.doesNotMatch(playbackSection, /s_buffer_count >= PLAYBACK_ADPCM_BYTES[\\s\\S]+s_sentence_ended \\?/, 
+assert.doesNotMatch(playbackSection, /s_buffer_count >= PLAYBACK_ADPCM_BYTES[\s\S]+s_sentence_ended \?/, 
   'small buffered audio tails must play before a sentence-end marker');
 assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-F'), 'en-US-Chirp3-HD-Kore');
 assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-M'), 'en-US-Chirp3-HD-Charon');
