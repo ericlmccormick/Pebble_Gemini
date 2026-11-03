@@ -48,7 +48,11 @@ this.testAPI = {
 const api = context.testAPI;
 assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-F'), 'en-US-Chirp3-HD-Kore');
 assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-M'), 'en-US-Chirp3-HD-Charon');
-assert.equal(context.normalizeTtsVoice('en-US-Neural2-F'), 'en-US-Journey-F');
+assert.equal(context.normalizeTtsVoice('en-US-Neural2-F'), 'en-US-Neural2-F');
+assert.equal(context.normalizeTtsVoice('en-US-Studio-O'), 'en-US-Wavenet-F');
+assert.equal(context.normalizeTtsVoice('en-US-Studio-M'), 'en-US-Wavenet-D');
+assert.equal(context.normalizeTtsVoice('en-US-Journey-F'), 'en-US-Wavenet-F');
+assert.equal(context.normalizeTtsVoice('en-US-Wavenet-D'), 'en-US-Wavenet-D');
 assert.equal(context.isInvalidVoiceError(Error("Voice 'en-US-Chirp3-HD-F' does not exist. Is it misspelled?")), true);
 
 assert.equal(api.adpcm([0, 1200, -1200, 1000]).length, 2, 'ADPCM is 4 bits/sample');
