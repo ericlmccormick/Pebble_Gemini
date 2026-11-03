@@ -70,7 +70,9 @@ try {
 var sentenceQueue = [];    
 var readyAudioQueue = [];  
 var isFetchingTTS = false; 
-var isSendingBLE = false;  
+var isSendingBLE = false;
+var requestGeneration = 0;
+var MAX_BLE_RETRIES = 4;  
 
 var js_adpcm_valpred = 0;  
 var js_adpcm_index = 0;    
@@ -419,7 +421,8 @@ Pebble.addEventListener('appmessage', function(e) {
   if (dict.COMMAND === 'DICTATION') {
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
     if (ttsApiKey === null) ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
-    enableTts = localStorage.getItem("ENABLE_TTS") === "true";
+    var savedToggle = localStorage.getItem("ENABLE_TTS");
+    if (savedToggle === "true" || savedToggle === "false") enableTts = savedToggle === "true";
 
     // Strictly validate ONLY the Gemini API Key. TTS key is optional.
     if (!geminiApiKey) {
@@ -452,6 +455,7 @@ function sendErrorToWatch(msg) {
 // =========================================================================
 
 function fetchGeminiResponse(prompt, skipAudio) {
+  var generation = ++requestGeneration;
   sentenceQueue = [];
   readyAudioQueue = [];
   isFetchingTTS = false;
@@ -489,6 +493,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
     return response.json(); 
   })
   .then(function(data) {
+    if (generation !== requestGeneration) return;
     if (data.candidates && data.candidates.length > 0) {
       var replyText = data.candidates[0].content.parts[0].text; 
       
@@ -504,7 +509,18 @@ function fetchGeminiResponse(prompt, skipAudio) {
         else if (audioProfile === "8k-8b") cmd = 'TEXT_RESPONSE_8_8';
       }
 
-      Pebble.sendAppMessage({ 'COMMAND': cmd, 'TEXT': replyText.substring(0, 2048) }); 
+      // UTF-8-aware limit: watch inbox is only 1024 bytes including tuple overhead.
+      var displayText = '', bytes = 0;
+      for (var i = 0; i < replyText.length; i++) {
+        var c = replyText.charCodeAt(i), size = c < 128 ? 1 : (c < 2048 ? 2 : 3);
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < replyText.length && replyText.charCodeAt(i + 1) >= 0xDC00 && replyText.charCodeAt(i + 1) <= 0xDFFF) {
+          if (bytes + 4 > 700) break;
+          displayText += replyText.substr(i, 2); bytes += 4; i++; continue;
+        }
+        if (bytes + size > 700) break;
+        displayText += replyText.charAt(i); bytes += size;
+      }
+      Pebble.sendAppMessage({ 'COMMAND': cmd, 'TEXT': displayText }); 
 
       if (!skipAudio) {
         var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText]; 
@@ -513,7 +529,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
         }).filter(function(s) { 
           return s.length > 0; 
         });
-        startTTSFetchLoop(); 
+        startTTSFetchLoop(generation); 
       }
 
     } else if (data.error && data.error.message) {
@@ -525,6 +541,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
     }
   })
   .catch(function() {
+    if (generation !== requestGeneration) return;
     conversationHistory.pop();
     sendErrorToWatch("Network error.");
   });
@@ -534,7 +551,8 @@ function fetchGeminiResponse(prompt, skipAudio) {
 // SECTION 12: TEXT-TO-SPEECH INTERFACE PIPELINE
 // =========================================================================
 
-function startTTSFetchLoop() {
+function startTTSFetchLoop(generation) {
+  if (generation !== requestGeneration) return;
   if (isFetchingTTS || sentenceQueue.length === 0) return; 
   isFetchingTTS = true; 
 
@@ -556,6 +574,7 @@ function startTTSFetchLoop() {
     return response.json();
   })
   .then(function(data) {
+    if (generation !== requestGeneration) return;
     if (data.audioContent) {
       var decoded = atob(data.audioContent); 
       var pcm16 = []; 
@@ -577,15 +596,16 @@ function startTTSFetchLoop() {
     isFetchingTTS = false; 
     
     if (!isSendingBLE) {
-        startBLESendLoop(); 
+        startBLESendLoop(generation); 
     }
     
-    startTTSFetchLoop(); 
+    startTTSFetchLoop(generation); 
   })
   .catch(function(err) {
+    if (generation !== requestGeneration) return;
     console.log('TTS Error', err);
     isFetchingTTS = false;
-    startTTSFetchLoop();
+    startTTSFetchLoop(generation);
   });
 }
 
@@ -593,18 +613,21 @@ function startTTSFetchLoop() {
 // SECTION 13: BLUETOOTH PACKET DISPATCH ENGINE
 // =========================================================================
 
-function startBLESendLoop() {
+function startBLESendLoop(generation) {
+  if (generation !== requestGeneration) return;
   if (isSendingBLE) return; 
   if (readyAudioQueue.length === 0) return; 
   
   isSendingBLE = true; 
   var adpcmBytes = readyAudioQueue.shift(); 
   var cursor = 0; 
+  var retries = 0;
 
   function sendNextChunk() {
+    if (generation !== requestGeneration) return;
     var previousCursor = cursor; 
     var chunk = [];              
-    var chunkSize = 700;         
+    var chunkSize = 400;         
 
     for (var i = 0; i < chunkSize && cursor < adpcmBytes.length; i++, cursor++) {
       chunk.push(adpcmBytes[cursor]); 
@@ -613,19 +636,38 @@ function startBLESendLoop() {
     if (chunk.length > 0) {
       Pebble.sendAppMessage(
         { 'COMMAND': 'AUDIO_CHUNK', 'CHUNK': chunk },
-        function success() { setTimeout(sendNextChunk, 60); }, 
-        function failure() { cursor = previousCursor; setTimeout(sendNextChunk, 200); } 
+        function success() {
+          if (generation !== requestGeneration) return;
+          retries = 0;
+          setTimeout(sendNextChunk, 60);
+        },
+        function failure() {
+          if (generation !== requestGeneration) return;
+          cursor = previousCursor;
+          if (++retries > MAX_BLE_RETRIES) {
+            console.log('Audio transfer aborted after repeated failures');
+            readyAudioQueue = []; sentenceQueue = []; isSendingBLE = false;
+            return;
+          }
+          setTimeout(sendNextChunk, 200 * retries);
+        } 
       );
     } else {
       Pebble.sendAppMessage(
         { 'COMMAND': 'AUDIO_SENTENCE_END' },
         function() { 
-            isSendingBLE = false; 
-            setTimeout(startBLESendLoop, 120); 
+            if (generation !== requestGeneration) return;
+            isSendingBLE = false;
+            setTimeout(function() { startBLESendLoop(generation); }, 120); 
         },
         function() { 
-            isSendingBLE = false;
-            setTimeout(startBLESendLoop, 300); 
+            if (generation !== requestGeneration) return;
+            if (++retries > MAX_BLE_RETRIES) {
+              console.log("Sentence end failed");
+              readyAudioQueue = []; sentenceQueue = []; isSendingBLE = false;
+              return;
+            }
+            setTimeout(sendNextChunk, 300); 
         }
       );
     }
