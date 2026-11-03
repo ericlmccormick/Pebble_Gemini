@@ -38,7 +38,6 @@ function normalizeTtsVoice(name) {
 }
 ttsVoice = normalizeTtsVoice(ttsVoice);
 localStorage.setItem("TTS_VOICE", ttsVoice);        
-var audioProfile = "8k-16b"; // Hardware output is 8-kHz PCM16, transmitted as 4-bit IMA ADPCM.          
 
 // LOGIC: Evaluate the user's TTS preference based on history
 var storedToggle = localStorage.getItem("ENABLE_TTS");
@@ -651,10 +650,6 @@ function fetchGeminiResponse(prompt, skipAudio) {
 }
 
 // =========================================================================
-// SECTION 12: TEXT-TO-SPEECH INTERFACE PIPELINE
-// =========================================================================
-
-// =========================================================================
 // SECTION 12: AUDIO PREPARATION (8-kHz WAV PCM16 -> IMA ADPCM)
 // =========================================================================
 
@@ -838,7 +833,6 @@ function handleAudioAck(dict) {
 var currentAudioData = null;
 var currentAudioCursor = 0;
 var currentAudioSeq = 0;
-var currentAudioEndPending = false;
 
 function startBLESendLoop(generation, streamId) {
   if (generation !== requestGeneration || isSendingBLE || !readyAudioQueue.length) return;
@@ -846,7 +840,6 @@ function startBLESendLoop(generation, streamId) {
   lastAckTime = 0; // Do not mistake a gap between TTS sentences for slow BLE.
   currentAudioData = readyAudioQueue.shift();
   currentAudioCursor = 0;
-  currentAudioEndPending = false;
   dispatchNextAudio(generation, streamId);
 }
 
