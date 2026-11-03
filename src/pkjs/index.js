@@ -122,7 +122,7 @@ var apiKeysItems = [
     "type": "input", 
     "messageKey": "GEMINI_API_KEY",
     "label": "Gemini API Key (Required)",
-    "description": geminiApiKey ? "✅ Status: Key is saved securely on your device." : "❌ Status: No key saved. App will not function.",
+    "description": geminiApiKey ? "✅ Status: Key saved locally in PebbleKit JS storage." : "❌ Status: No key saved. App will not function.",
     "attributes": {
       "type": "text",
       "autocorrect": "off",
@@ -145,7 +145,7 @@ if (hasSpeaker) {
     "type": "input", 
     "messageKey": "TTS_API_KEY",
     "label": "Google Cloud TTS API Key",
-    "description": ttsApiKey ? "✅ Status: Key saved securely." : "ℹ️ Status: No key saved.",
+    "description": ttsApiKey ? "✅ Status: Key saved locally." : "ℹ️ Status: No key saved.",
     "attributes": {
       "type": "text",
       "autocorrect": "off",
@@ -365,7 +365,9 @@ Pebble.addEventListener('showConfiguration', function() {
 
 Pebble.addEventListener('webviewclosed', function(e) {
   if (e && !e.response) return; 
-  var settings = JSON.parse(decodeURIComponent(e.response)); 
+  var settings;
+  try { settings = JSON.parse(decodeURIComponent(e.response)); }
+  catch (error) { console.log('Invalid configuration response', error); return; } 
 
   if (settings.CUSTOM_PERSONA) {
     customPersona = settings.CUSTOM_PERSONA.value;
@@ -382,9 +384,10 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem("ENABLE_TTS", enableTts ? "true" : "false"); 
   }
 
-  if (settings.TTS_API_KEY !== undefined) {
+  // An intentionally blank Clay field must not erase a previously saved key.
+  if (settings.TTS_API_KEY && settings.TTS_API_KEY.value) {
     ttsApiKey = settings.TTS_API_KEY.value;
-    localStorage.setItem("TTS_API_KEY", ttsApiKey); // Saves the hidden value if toggled off!
+    localStorage.setItem("TTS_API_KEY", ttsApiKey);
   }
 
   if (settings.GEMINI_MODEL) {
@@ -724,6 +727,7 @@ var currentAudioEndPending = false;
 function startBLESendLoop(generation, streamId) {
   if (generation !== requestGeneration || isSendingBLE || !readyAudioQueue.length) return;
   isSendingBLE = true;
+  lastAckTime = 0; // Do not mistake a gap between TTS sentences for slow BLE.
   currentAudioData = readyAudioQueue.shift();
   currentAudioCursor = 0;
   currentAudioEndPending = false;
