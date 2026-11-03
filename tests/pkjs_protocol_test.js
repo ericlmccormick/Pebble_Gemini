@@ -59,6 +59,33 @@ assert.match(playbackSection, /if \(s_pending_pcm_offset < s_pending_pcm_bytes\)
   'silence should only be written on truly empty playback ticks');
 assert.doesNotMatch(playbackSection, /s_buffer_count >= PLAYBACK_ADPCM_BYTES[\s\S]+s_sentence_ended \?/, 
   'small buffered audio tails must play before a sentence-end marker');
+// Sentence-gate regression: subsequent sentences require their own reservoir,
+// independent of the first sentence and without cycling the amplifier.
+assert.match(watchC, /#define SENTENCE_QUEUE_SIZE 32\b/);
+assert.match(watchC, /static bool sentence_ready\(AudioSentence \*sentence\)/);
+assert.match(watchC, /s_received_audio_bytes - sentence->start/);
+assert.match(watchC, /unplayed >= sentence->start_threshold \|\| stored == total/);
+assert.match(playbackSection, /AudioSentence \*sentence = active_sentence\(\)/);
+assert.match(playbackSection, /sentence && sentence_ready\(sentence\)/);
+assert.match(playbackSection, /remaining_in_sentence = sentence->end - s_consumed_audio_bytes/);
+assert.doesNotMatch(playbackSection, /speaker_stream_close\(\)/,
+  'normal sentence transitions must not power down the amplifier');
+
+// Model the boundary math for two prefetched sentences: first sentence
+// may already be consumed, but the next one must wait for its own data.
+function gatedSentenceReady(start, end, threshold, received, consumed) {
+  const stored = Math.min(end - start, Math.max(0, received - start));
+  const used = Math.max(0, consumed - start);
+  const unplayed = Math.max(0, stored - used);
+  return unplayed >= threshold || stored === end - start;
+}
+assert.equal(gatedSentenceReady(0, 4800, 3000, 4800, 0), true);
+assert.equal(gatedSentenceReady(4800, 12800, 3600, 5200, 4800), false,
+  '400 bytes of second sentence cannot start despite 4800 bytes already played');
+assert.equal(gatedSentenceReady(4800, 12800, 3600, 8400, 4800), true,
+  'second sentence starts once its own 3600-byte reserve arrives');
+assert.equal(gatedSentenceReady(4800, 6000, 1200, 6000, 4800), true,
+  'short sentences start as soon as their entire audio is buffered');
 assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-F'), 'en-US-Chirp3-HD-Kore');
 assert.equal(context.normalizeTtsVoice('en-US-Chirp3-HD-M'), 'en-US-Chirp3-HD-Charon');
 assert.equal(context.normalizeTtsVoice('en-US-Neural2-F'), 'en-US-Neural2-F');
