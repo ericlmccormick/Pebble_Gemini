@@ -54,7 +54,8 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
   static AppTimer *s_playback_timer = NULL;     
   static AppTimer *s_stream_close_timer = NULL; 
   static bool s_speaker_open = false;           
-  static bool s_ignore_audio = false;           
+  static bool s_ignore_audio = false;
+  static bool s_sentence_ended = false;           
 
   static const int16_t stepTable[89] = {
     7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,
@@ -257,8 +258,14 @@ static void update_text_layout() {
 
     static int16_t s_out_buf[PLAYBACK_PCM_SAMPLES]; 
 
-    if (s_buffer_count >= PLAYBACK_ADPCM_BYTES) { 
-      for (int i = 0; i < PLAYBACK_ADPCM_BYTES; i++) { 
+    // A final sentence may contain fewer than 800 ADPCM bytes.
+    // Previously that tail could be trapped forever while silence was played.
+    uint32_t bytes_to_play = s_buffer_count >= PLAYBACK_ADPCM_BYTES
+                           ? PLAYBACK_ADPCM_BYTES
+                           : (s_sentence_ended ? s_buffer_count : 0);
+    if (bytes_to_play > 0) {
+      memset(s_out_buf, 0, sizeof(s_out_buf));
+      for (uint32_t i = 0; i < bytes_to_play; i++) { 
         uint8_t adpcm_byte = s_ring_buffer[s_head]; 
         s_head = (s_head + 1) % RING_BUFFER_SIZE; 
         s_buffer_count--;                       
@@ -269,7 +276,8 @@ static void update_text_layout() {
         s_out_buf[i * 2] = decode_adpcm_to_16bit(nibble1);     
         s_out_buf[(i * 2) + 1] = decode_adpcm_to_16bit(nibble2); 
       }
-      speaker_stream_write((uint8_t*)s_out_buf, sizeof(s_out_buf)); 
+      speaker_stream_write((uint8_t*)s_out_buf, sizeof(s_out_buf));
+      if (s_buffer_count == 0) s_sentence_ended = false;
     } else {
       memset(s_out_buf, 0, sizeof(s_out_buf));
       speaker_stream_write((uint8_t*)s_out_buf, sizeof(s_out_buf)); 
@@ -291,7 +299,8 @@ static void update_text_layout() {
     s_buffer_count = 0;                         
     s_head = 0;                                 
     s_tail = 0;                                 
-    reset_adpcm_state();                        
+    reset_adpcm_state();
+    s_sentence_ended = false;
     set_status(NULL);                           
   }
 
@@ -456,11 +465,16 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     if (s_ignore_audio) return;                 
     Tuple *chunk_tuple = dict_find(iterator, MESSAGE_KEY_CHUNK); 
     if (chunk_tuple) {
+      s_sentence_ended = false;
+      if (s_buffer_count + chunk_tuple->length > RING_BUFFER_SIZE) {
+        APP_LOG(APP_LOG_LEVEL_WARNING, "Audio ring buffer full; incoming chunk may be lost");
+      }
       push_to_ring_buffer(chunk_tuple->value->data, chunk_tuple->length); 
       if (!s_speaker_open && s_buffer_count >= START_BUFFER_THRESHOLD) start_playback();
     }
   } else if (strcmp(command_tuple->value->cstring, "AUDIO_SENTENCE_END") == 0) { 
-    if (s_ignore_audio) return;                 
+    if (s_ignore_audio) return;
+    s_sentence_ended = true;
     if (!s_speaker_open && s_buffer_count > 0) start_playback(); 
   } 
   #endif
