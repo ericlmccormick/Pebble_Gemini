@@ -99,3 +99,9 @@ The playback loop now:
 This specifically reduces artificial pauses caused by buffering and silence insertion; punctuation pauses naturally present in the synthesized speech remain unchanged. The 16-KB compressed ring, sequenced ACK transport, adaptive *initial* buffering and explicit final amp shutdown are preserved.
 
 On-device regression check: have Gemini say a long sentence with several commas (no periods) followed by multiple sentences. Check that commas sound natural, syllables do not break up, there are no between-sentence pops, and the final word is complete.
+
+## Supported watches (1.5.0)
+
+The native package now targets basalt, chalk, diorite, flint, emery and gabbro. All six have a microphone for spoken dictation. Phone-side speaker detection enables synthesized replies for Flint (Pebble 2 Duo) and Emery (Pebble Time 2) only. Basalt, Chalk, Diorite and Gabbro (Pebble Round 2) show the answer as text; Round 2 has no speaker. Aplite (original Pebble/Steel) is excluded because it has no microphone and this app currently provides no alternative question input.
+
+Flint uses the existing Diorite black-and-white logo. Gabbro uses the Chalk round logo. Both share the existing native PBL_ROUND/PBL_SPEAKER compile-time paths. Recheck actual speaker playback on Flint hardware when a device becomes available. The six-platform Pebble SDK build is now checked in GitHub Actions, in addition to the JavaScript and protocol regression suite.
