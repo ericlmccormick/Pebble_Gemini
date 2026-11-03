@@ -2,7 +2,7 @@
 // SECTION 1: LIBRARY IMPORT & INITIALIZATION
 // =========================================================================
 
-var Clay = require('pebble-clay'); 
+var Clay = require('@rebble/clay'); 
 
 // =========================================================================
 // SECTION 2: STORAGE MEMORY RECOVERY & TOGGLE LOGIC
