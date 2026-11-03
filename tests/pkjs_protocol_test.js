@@ -40,9 +40,11 @@ this.testAPI = {
   ack: handleAudioAck,
   cancel: cancelCurrentAudio,
   seed: function(samples) {
+    cancelCurrentAudio();
     requestGeneration = 1;
     readyAudioQueue = [samples];
   },
+  enqueue: function(samples) { readyAudioQueue.push(samples); },
   state: function() { return {seq:currentAudioSeq,active:activeTransfer, sending:isSendingBLE, generation:requestGeneration}; }
 };`, context);
 const api = context.testAPI;
@@ -89,15 +91,23 @@ api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:314, SEQ:4});
 assert.equal(api.state().sending,false);
 assert.equal(api.state().active,null);
 
-// Two sentences: never shut down after the first sentence boundary.
+// Two sentences: after the first boundary the phone immediately starts
+// the second sentence; it only sends the final marker after both are ACKed.
 api.seed(Array.from({length:20}, (_,i)=>i));
-api.start(1,316);
+api.enqueue(Array.from({length:24}, (_,i)=>i));
 const secondBegin = sent.length;
-api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:5});
-assert.equal(sent[secondBegin].COMMAND, 'AUDIO_SENTENCE_END');
-api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:6});
-assert.equal(sent[secondBegin + 1].COMMAND, 'AUDIO_STREAM_END');
-api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:7});
+api.start(1,316);
+assert.equal(sent[secondBegin].COMMAND, 'AUDIO_CHUNK');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:0});
+assert.equal(sent[secondBegin + 1].COMMAND, 'AUDIO_SENTENCE_END');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:1});
+assert.equal(sent[secondBegin + 2].COMMAND, 'AUDIO_CHUNK');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:2});
+assert.equal(sent[secondBegin + 3].COMMAND, 'AUDIO_SENTENCE_END');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:3});
+assert.equal(sent[secondBegin + 4].COMMAND, 'AUDIO_STREAM_END');
+api.ack({COMMAND:'AUDIO_ACK', STREAM_ID:316, SEQ:4});
+assert.equal(api.state().sending, false);
 
 api.seed([1,2,3]);
 api.start(1,315);
