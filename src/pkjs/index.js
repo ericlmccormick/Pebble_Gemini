@@ -93,12 +93,11 @@ try {
 // SECTION 4: ECOSYSTEM PLATFORM DETECTION
 // =========================================================================
 
-// Only enable voice for speaker hardware supported by this build.
-// gabbro (Pebble Round 2) has no speaker; unknown platforms use text-only.
-// Flint can be enabled separately when it is added to targetPlatforms and
-// native speaker playback is validated on that device.
+// Pebble 2 Duo (flint) and Time 2 (emery) have speakers. Round 2
+// (gabbro) has a microphone but no speaker: use dictation + text only.
+// Unknown hardware defaults to text-only until its capabilities are known.
 function platformHasSpeaker(platform) {
-  return platform === 'emery';
+  return platform === 'flint' || platform === 'emery';
 }
 var watchInfo = null;
 var hasSpeaker = false;
