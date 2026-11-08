@@ -1,0 +1,12 @@
+{
+    "BUFFER_FREE": 10007,
+    "BUFFER_HINT": 10009,
+    "CHUNK": 10002,
+    "COMMAND": 10000,
+    "FONT_SIZE": 10003,
+    "SENTENCE_TOTAL": 10008,
+    "SEQ": 10006,
+    "STREAM_ID": 10005,
+    "TEXT": 10001,
+    "VOLUME": 10004
+}
