@@ -17,6 +17,7 @@ function useStoredBackend(key,hasLegacyKey){return localStorage.getItem(key)||(h
 var geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || ""; 
 var ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
 var geminiBackend=useStoredBackend('GEMINI_BACKEND',!!geminiApiKey);
+if(geminiBackend==='plugin'){geminiBackend=AgentPlugins.agentId();localStorage.setItem('GEMINI_BACKEND',geminiBackend);}
 // Migrate old speech preference once: false means None. Fresh installs
 // default to the Google Cloud TTS plugin, including when no key exists.
 function migrateSpeechProvider(){
@@ -30,7 +31,7 @@ function migrateSpeechProvider(){
   return provider;
 }
 var ttsBackend=migrateSpeechProvider();
-var geminiPluginConversationId=localStorage.getItem('GEMINI_PLUGIN_CONVERSATION_ID')||'';
+// AI Conversation manages its own default conversation.
        
 var fontSize = localStorage.getItem("FONT_SIZE") || 24;          
 var customPersona = localStorage.getItem("CUSTOM_PERSONA") || ""; 
@@ -209,9 +210,9 @@ var indexTable = [
 var apiKeysItems = [
   {type:'heading',defaultValue:'Service providers'},
   {
-    type:'select',messageKey:'GEMINI_BACKEND',label:'Gemini conversations',
+    type:'select',messageKey:'GEMINI_BACKEND',label:'AI conversation provider',
     defaultValue:geminiBackend,
-    description:'Plugin: set the key, model and pricing in Gemini Conversation plugin settings. Direct: use this app\'s legacy API settings.',
+    description:'AI Conversation selects the provider and model internally and returns full replies. Other installed agents may only acknowledge delivery.',
     options:AgentPlugins.options(Pebble,geminiBackend)
   },
   {
@@ -479,19 +480,15 @@ Pebble.addEventListener('webviewclosed', function(e) {
 
   if (settings.CLEAR_HISTORY && (settings.CLEAR_HISTORY.value === true || settings.CLEAR_HISTORY.value === 'true')) {
     cancelCurrentAudio();
-    if(geminiPluginConversationId&&typeof Pebble.invokeAction==='function'){
-      Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'clear_conversation',
-        args:{conversation_id:geminiPluginConversationId}}).catch(function(){});
+    if(typeof Pebble.invokeAction==='function'){
+      Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'clear_conversation',args:{all:true}}).catch(function(){});
     }
-    geminiPluginConversationId='';
-    localStorage.removeItem('GEMINI_PLUGIN_CONVERSATION_ID');
-    conversationHistory = [];
     localStorage.setItem('CHAT_HISTORY', '[]');
     console.log('Conversation history cleared');
   }
   if(settings.GEMINI_BACKEND){
     var selectedAgent=String(settings.GEMINI_BACKEND.value||'plugin');
-    geminiBackend=selectedAgent==='direct'||selectedAgent==='plugin'||/^agent:[a-f0-9-]{36}$/.test(selectedAgent)?selectedAgent:'plugin';
+    geminiBackend=selectedAgent==='direct'||/^agent:[a-f0-9-]{36}$/.test(selectedAgent)?selectedAgent:AgentPlugins.agentId();
     localStorage.setItem('GEMINI_BACKEND',geminiBackend);
   }
   if(settings.TTS_BACKEND){
@@ -574,29 +571,9 @@ Pebble.addEventListener('appmessage', function(e) {
       skipAudio = true;    
     }
 
-    if(geminiBackend.indexOf('agent:')===0){
-      // A third-party agent may receive a message, but the current plugin
-      // contract returns a delivery receipt and not its full response.
-      sendToInstalledAgent(dict.TEXT);
-    }else{
-      fetchGeminiResponse(dict.TEXT, skipAudio);
-    } 
+    fetchGeminiResponse(dict.TEXT, skipAudio);
   }
 });
-
-function sendToInstalledAgent(text){
-  cancelCurrentAudio();
-  var generation=requestGeneration;
-  var agent=AgentPlugins.selected(Pebble,geminiBackend);
-  AgentPlugins.dispatch(Pebble,agent,text).then(function(receipt){
-    if(generation!==requestGeneration)return;
-    sendErrorToWatch(receipt.message);
-  }).catch(function(error){
-    if(generation!==requestGeneration)return;
-    // Never retry an uncertain delivery; it may already have been sent.
-    sendErrorToWatch('Agent send failed: '+String(error&&error.message||error).slice(0,145));
-  });
-}
 
 function sendErrorToWatch(msg) {
   Pebble.sendAppMessage({ 'COMMAND': 'TEXT_RESPONSE_NO_AUDIO', 'TEXT': msg }); 
@@ -631,24 +608,12 @@ function fetchGeminiResponse(prompt, skipAudio) {
   var url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
 
   var responseRequest;
-  if(geminiBackend==='plugin'){
-    if(typeof Pebble.invokeAction!=='function'){
-      sendErrorToWatch('Update Pebble phone app for plugin support.');
-      return;
-    }
-    var pluginArgs={text:prompt,instructions:systemText};
-    if(geminiPluginConversationId)pluginArgs.conversation_id=geminiPluginConversationId;
-    responseRequest=Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'conversation',args:pluginArgs})
-      .then(function(reply){
-        if(!reply||!reply.ok)throw Error('Gemini plugin unavailable: '+String(reply&&reply.message||'Install/configure plugin and grant permission'));
-        var data;
-        try{data=JSON.parse(reply.text||'{}');}catch(e){throw Error('Gemini plugin returned invalid JSON');}
-        if(data.conversation_id){
-          geminiPluginConversationId=data.conversation_id;
-          localStorage.setItem('GEMINI_PLUGIN_CONVERSATION_ID',data.conversation_id);
-        }
-        return {candidates:[{content:{parts:[{text:String(data.text||'')}]}}]};
-      });
+  if(geminiBackend!=='direct'){
+    var agent=AgentPlugins.selected(Pebble,geminiBackend);
+    responseRequest=AgentPlugins.dispatch(Pebble,agent,prompt).then(function(result){
+      if(result.kind==='receipt')return {delivery_receipt:result.text};
+      return {candidates:[{content:{parts:[{text:result.text}]}}]};
+    });
   }else responseRequest=requestJsonWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -659,6 +624,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
   }, GEMINI_TIMEOUT_MS);
   responseRequest.then(function(data) {
     if (generation !== requestGeneration) return;
+    if(data.delivery_receipt){sendErrorToWatch(data.delivery_receipt);return;}
     if (data.candidates && data.candidates.length > 0) {
       var parts = data.candidates[0].content && data.candidates[0].content.parts || [];
       var replyText = parts.map(function(part) { return part.text || ''; }).join(' ').trim();
@@ -708,7 +674,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
   })
   .catch(function(error) {
     if (generation !== requestGeneration) return;
-    sendErrorToWatch(apiErrorMessage(error, 'Gemini'));
+    sendErrorToWatch(apiErrorMessage(error,geminiBackend==='direct'?'Gemini':'AI agent'));
   });
 }
 

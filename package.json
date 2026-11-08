@@ -82,7 +82,7 @@
     "watchapp": {
       "watchface": false
     },
-    "version": "1.6.4",
+    "version": "1.7.0",
     "manifestVersion": 2,
     "usesPermissions": [
       {
@@ -95,10 +95,6 @@
         }
       },
       "WatchMicrophone",
-      {
-        "name": "GeminiConverse",
-        "plugin": "2c5edc42-b096-4f76-b284-1f27907e6501"
-      },
       {
         "name": "InvokeAction",
         "plugin": "2c5edc42-b096-4f76-b284-1f27907e6501"
@@ -129,5 +125,5 @@
       }
     ]
   },
-  "version": "1.6.4"
+  "version": "1.7.0"
 }
