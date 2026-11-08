@@ -45,7 +45,58 @@ static Layer *s_pinwheel_layer;
 static AppTimer *s_pinwheel_timer = NULL;       
 static int s_pinwheel_angle = 0;                
 static DictationSession *s_dictation_session;   
-static char s_gemini_text[MAX_TEXT_LENGTH];     
+static char s_gemini_text[MAX_TEXT_LENGTH];
+#define PERSIST_KEY_APPEARANCE 101
+static int s_appearance_mode = 0; // auto / day / night
+static time_t s_sunrise = 0, s_sunset = 0;
+static bool s_is_night = true;
+
+static bool appearance_is_night(void) {
+  if (s_appearance_mode == 1) return false;
+  if (s_appearance_mode == 2) return true;
+  time_t now = time(NULL);
+  struct tm *local = localtime(&now);
+  int minute = local ? local->tm_hour * 60 + local->tm_min : 720;
+  if (s_sunrise > 0 && s_sunset > s_sunrise) {
+    struct tm *rise = localtime(&s_sunrise);
+    int rise_min = rise ? rise->tm_hour * 60 + rise->tm_min : 420;
+    struct tm *set = localtime(&s_sunset);
+    int set_min = set ? set->tm_hour * 60 + set->tm_min : 1140;
+    if (rise_min < set_min) return minute < rise_min || minute >= set_min;
+  }
+  return minute < 420 || minute >= 1140;
+}
+
+static void update_appearance(void) {
+  bool dark = appearance_is_night();
+  s_is_night = dark;
+  GColor fg = dark ? GColorWhite : GColorBlack;
+  GColor bg = dark ? GColorBlack : GColorWhite;
+  if (s_main_window) window_set_background_color(s_main_window, bg);
+  if (s_text_layer) {
+    text_layer_set_text_color(s_text_layer, fg);
+    text_layer_set_background_color(s_text_layer, bg);
+  }
+  if (s_status_layer) {
+    text_layer_set_text_color(s_status_layer, fg);
+    text_layer_set_background_color(s_status_layer, bg);
+  }
+  if (s_title_layer) text_layer_set_text_color(s_title_layer, fg);
+  if (s_byline_layer) text_layer_set_text_color(s_byline_layer, fg);
+  if (s_prompt_layer) text_layer_set_text_color(s_prompt_layer, fg);
+#ifdef PBL_SPEAKER
+  if (s_volume_text_layer) {
+    text_layer_set_text_color(s_volume_text_layer, fg);
+    text_layer_set_background_color(s_volume_text_layer, bg);
+  }
+#endif
+  if (s_arrow_layer) layer_mark_dirty(s_arrow_layer);
+  if (s_pinwheel_layer) layer_mark_dirty(s_pinwheel_layer);
+}
+static void appearance_tick(struct tm *tick_time, TimeUnits units_changed) {
+  if (s_appearance_mode == 0 && appearance_is_night() != s_is_night) update_appearance();
+}
+     
 
 // =========================================================================
 // SECTION 3: SPEAKER INFRASTRUCTURE VARIABLES & TABLES (SPEAKER ONLY)
@@ -142,7 +193,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
   GPoint center = grect_center_point(&bounds);  
   int radius = 9;                               
-  graphics_context_set_stroke_color(ctx, GColorWhite); 
+  graphics_context_set_stroke_color(ctx, s_is_night ? GColorWhite : GColorBlack); 
   graphics_context_set_stroke_width(ctx, 3);    
   for(int i = 0; i < 4; i++) {                  
      int32_t angle = TRIG_MAX_ANGLE * (s_pinwheel_angle + i * 90) / 360; 
@@ -154,7 +205,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
 
 static void arrow_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
-  graphics_context_set_stroke_color(ctx, GColorWhite); 
+  graphics_context_set_stroke_color(ctx, s_is_night ? GColorWhite : GColorBlack); 
   graphics_context_set_stroke_width(ctx, 3);    
   int y = bounds.size.h / 2;                    
   int x_start = 0;                              
@@ -606,6 +657,21 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   Tuple *command_tuple = dict_find(iterator, MESSAGE_KEY_COMMAND); 
   if (!command_tuple) return;                   
 
+  if (strcmp(command_tuple->value->cstring, "UPDATE_APPEARANCE") == 0) {
+    Tuple *mode = dict_find(iterator, MESSAGE_KEY_APPEARANCE_MODE);
+    Tuple *rise = dict_find(iterator, MESSAGE_KEY_SUNRISE);
+    Tuple *set = dict_find(iterator, MESSAGE_KEY_SUNSET);
+    if (mode && mode->value->int32 >= 0 && mode->value->int32 <= 2) {
+      s_appearance_mode = mode->value->int32;
+      persist_write_int(PERSIST_KEY_APPEARANCE, s_appearance_mode);
+    }
+    if (rise && set && rise->value->int32 > 0 && set->value->int32 > rise->value->int32) {
+      s_sunrise = (time_t)rise->value->int32;
+      s_sunset = (time_t)set->value->int32;
+    }
+    update_appearance();
+    return;
+  }
   if(strcmp(command_tuple->value->cstring,"AGENT_INFO")==0){
     Tuple *name=dict_find(iterator,MESSAGE_KEY_AGENT_NAME);
     Tuple *icon=dict_find(iterator,MESSAGE_KEY_AGENT_ICON);
@@ -892,6 +958,7 @@ static void main_window_load(Window *window) {
 
   s_dictation_session = dictation_session_create(sizeof(s_gemini_text), dictation_session_callback, NULL);
 
+  update_appearance();
   set_ui_state(UI_STATE_IDLE); 
 }
 
@@ -931,6 +998,12 @@ static void main_window_unload(Window *window) {
 // =========================================================================
 
 static void init() {
+  if (persist_exists(PERSIST_KEY_APPEARANCE)) {
+    int mode = persist_read_int(PERSIST_KEY_APPEARANCE);
+    if (mode >= 0 && mode <= 2) s_appearance_mode = mode;
+  }
+  s_is_night = appearance_is_night();
+  tick_timer_service_subscribe(MINUTE_UNIT, appearance_tick);
   #ifdef PBL_SPEAKER
     if (persist_exists(PERSIST_KEY_VOLUME)) s_volume = persist_read_int(PERSIST_KEY_VOLUME) / 100.0f;
     else s_volume = 1.0f;
@@ -951,6 +1024,7 @@ static void init() {
 }
 
 static void deinit() { 
+  tick_timer_service_unsubscribe();
   window_destroy(s_main_window);                
 }
 
