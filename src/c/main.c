@@ -826,7 +826,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       s_ignore_audio = true;
       stop_audio();
       Tuple *reason = dict_find(iterator, MESSAGE_KEY_TEXT);
-      if (reason && reason->value->cstring && reason->value->cstring[0]) {
+      if (reason && reason->length > 1) {
         snprintf(s_gemini_text, sizeof(s_gemini_text), "Speech error: %.90s", reason->value->cstring);
         APP_LOG(APP_LOG_LEVEL_ERROR, "%s", s_gemini_text);
         set_status("TTS error (phone log)");
