@@ -33,7 +33,7 @@ function Clay(config,customizer){
 function set(key,value){const item=items.get(key);assert.ok(item,key);item.state.value=value;if(item.state.change)item.state.change();}
 function shown(key){const item=items.get(key);assert.ok(item,key);return item.state.visible;}
 const Pebble={getActiveWatchInfo:()=>({platform:'emery'}),
- enumeratePlugins:()=>[{uuid:'2c5edc42-b096-4f76-b284-1f27907e6501',name:'Gemini Conversation',actions:[{name:'conversation'}]},
+ enumeratePlugins:()=>[{uuid:'2c5edc42-b096-4f76-b284-1f27907e6501',name:'AI Conversation',actions:[{name:'send_to_agent',parameters:{properties:{message:{type:'string'}}}}]},
  {uuid:'3f97d5c5-bc28-48ba-b4af-e7ad7f6000f0',name:'ChatGPT',actions:[{name:'send_to_agent',parameters:{properties:{message:{type:'string'}}}}]}],
  addEventListener:(name,fn)=>{listeners[name]=fn;},
  sendAppMessage:(value,ok)=>{if(ok)ok();},openURL:()=>{}};
@@ -50,12 +50,12 @@ storage['clay-settings']=JSON.stringify({
 });
 listeners.showConfiguration();
 const synced=JSON.parse(storage['clay-settings']);
-assert.equal(synced.GEMINI_BACKEND,'plugin');
+assert.equal(synced.GEMINI_BACKEND,'agent:2c5edc42-b096-4f76-b284-1f27907e6501');
 assert.equal(synced.TTS_BACKEND,'plugin');
 assert.equal(synced.GEMINI_MODEL,'gemini-3.8-flash');
 assert.equal(synced.TTS_VOICE,'en-US-Wavenet-F');
 assert.equal(shown('GEMINI_API_KEY'),false);
-assert.ok(items.get('GEMINI_BACKEND').state.value==='plugin');
+assert.equal(storage.GEMINI_BACKEND,'agent:2c5edc42-b096-4f76-b284-1f27907e6501');
 const configuredOptions=JSON.stringify(app.match(/options:AgentPlugins.options\(Pebble,geminiBackend\)/));
 assert.ok(configuredOptions.includes('AgentPlugins.options'));
 assert.equal(shown('GEMINI_MODEL'),false);
@@ -67,7 +67,7 @@ assert.equal(shown('CUSTOM_PERSONA'),true);
 set('GEMINI_BACKEND','direct');
 assert.equal(shown('GEMINI_API_KEY'),true);
 assert.equal(shown('GEMINI_MODEL'),true);
-set('GEMINI_BACKEND','plugin');
+set('GEMINI_BACKEND','agent:2c5edc42-b096-4f76-b284-1f27907e6501');
 assert.equal(shown('GEMINI_API_KEY'),false);
 assert.equal(shown('GEMINI_MODEL'),false);
 set('TTS_BACKEND','direct');
@@ -83,7 +83,7 @@ set('TTS_BACKEND','direct');
 assert.equal(shown('TTS_API_KEY'),true);
 set('TTS_BACKEND','plugin');
 listeners.webviewclosed({response:encodeURIComponent(JSON.stringify({
- GEMINI_BACKEND:{value:'plugin'},TTS_BACKEND:{value:'plugin'},
+ GEMINI_BACKEND:{value:'agent:2c5edc42-b096-4f76-b284-1f27907e6501'},TTS_BACKEND:{value:'plugin'},
  GEMINI_API_KEY:{value:'must-not-save'},TTS_API_KEY:{value:'must-not-save'},
  GEMINI_MODEL:{value:'gemini-2.5-pro'},TTS_VOICE:{value:'en-US-Chirp3-HD-Puck'}
 }))});
@@ -97,6 +97,6 @@ assert.doesNotMatch(app,/messageKey:['"]ENABLE_TTS['"]/);
 assert.match(app,/value:'none'/);
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
 const permissions=manifest.pebble.usesPermissions||[];
-assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6501'&&p.name==='GeminiConverse'));
+assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6501'&&p.name==='InvokeAction'));
 assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6502'&&p.name==='GoogleTtsSpeak'));
 console.log('PASS: isolated Clay webview, legacy/plugin switching, persisted provider sync, and stable plugin permissions');
