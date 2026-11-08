@@ -310,7 +310,9 @@ var apiKeysItems = [
     ]
   }
 ];
-if(hasSpeaker){
+if(true){
+  // Expose speech settings even if watch metadata arrives late; the watch
+  // capability handshake controls actual playback, not the Clay layout.
   apiKeysItems.push({
     type:'select',messageKey:'TTS_BACKEND',label:'Speech provider',
     defaultValue:ttsBackend,
@@ -636,14 +638,23 @@ function providerIcon(provider){
 function agentInfoPayload(name,icon){
   return {COMMAND:'AGENT_INFO',AGENT_NAME:String(name||'WISP').slice(0,28),AGENT_ICON:icon|0};
 }
+function sendAgentInfoReliable(name,icon) {
+  var message=agentInfoPayload(name,icon);
+  Pebble.sendAppMessage(message,function(){},function(err){
+    console.log('Agent display retry',err);
+    setTimeout(function(){
+      Pebble.sendAppMessage(message,function(){},function(e){console.log('Agent display unavailable',e);});
+    },250);
+  });
+}
 function refreshAgentInfo(){
   var generation=++agentInfoGeneration;
   if(geminiBackend==='direct'){
-    Pebble.sendAppMessage(agentInfoPayload('Gemini',1));return;
+    sendAgentInfoReliable('Gemini',1);return;
   }
   var chosen=AgentPlugins.selected(Pebble,geminiBackend);
   if(!chosen){
-    Pebble.sendAppMessage(agentInfoPayload('WISP',0));return;
+    sendAgentInfoReliable('WISP',0);return;
   }
   if(chosen.uuid!==GEMINI_PLUGIN_UUID){
     var aliases={};
@@ -652,9 +663,10 @@ function refreshAgentInfo(){
     aliases['80ee6780-856f-411f-954b-4553ba7f2af8']=['Grok Bot',4];
     aliases['b8346592-cd59-4b83-9185-87d94e0734b0']=['Muse',5];
     var displayed=aliases[chosen.uuid]||[chosen.name,0];
-    Pebble.sendAppMessage(agentInfoPayload(displayed[0],displayed[1]));return;
+    sendAgentInfoReliable(displayed[0],displayed[1]);return;
   }
-  Pebble.sendAppMessage(agentInfoPayload('WISP',0));
+  // Preserve the previous known provider instead of briefly replacing it
+  // with WISP, which could remain stuck if get_config fails.
   if(typeof Pebble.invokeAction!=='function')return;
   Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'get_config',args:{}})
     .then(function(reply){
@@ -663,19 +675,23 @@ function refreshAgentInfo(){
       if(reply&&reply.ok&&typeof reply.text==='string'){
         try{config=JSON.parse(reply.text);}catch(e){}
       }
-      if(!config.provider)return;
+      if(!config.provider){
+        console.log('Agent provider config missing; retaining previous display');
+        return;
+      }
       var icon=providerIcon(config.provider);
       var label=String(config.provider_name||config.provider);
       if(label==='OpenAI')label='ChatGPT';
       if(label==='Anthropic')label='Claude';
       if(label==='xAI')label='Grok';
-      Pebble.sendAppMessage(agentInfoPayload(label,icon));
+      sendAgentInfoReliable(label,icon);
     }).catch(function(err){
       console.log('WISP provider info unavailable',err&&err.code||err&&err.message||err);
     });
 }
 
 Pebble.addEventListener('ready', function() {
+  detectSpeakerFromInfo();
   refreshAgentInfo();
   sendAppearance();
   beginWeatherAppearance();
@@ -685,7 +701,13 @@ Pebble.addEventListener('ready', function() {
 });
 
 Pebble.addEventListener('appmessage', function(e) {
-  var dict = e.payload; 
+  var dict = e.payload;
+  if (dict.COMMAND === 'WATCH_STATUS') {
+    hasSpeaker = Number(dict.SPEAKER_CAPABLE) === 1;
+    console.log('Watch reported speaker=',hasSpeaker,'volume=',dict.VOLUME,'TTS provider=',ttsBackend);
+    refreshAgentInfo();
+    return;
+  } 
 
   if (dict.COMMAND === 'AUDIO_ACK' || dict.COMMAND === 'AUDIO_WAIT') {
     handleAudioAck(dict);
@@ -700,10 +722,12 @@ Pebble.addEventListener('appmessage', function(e) {
     // The C app sends VOLUME only for builds with PBL_SPEAKER.
     // This is authoritative even if getActiveWatchInfo reports an alias or
     // is unavailable when the phone-side JS first initializes.
-    if (typeof dict.VOLUME === 'number' && dict.VOLUME > 0 && !hasSpeaker) {
+    if (dict.SPEAKER_CAPABLE !== undefined) {
+      hasSpeaker = Number(dict.SPEAKER_CAPABLE) === 1;
+    } else if (Number(dict.VOLUME)>0 && !hasSpeaker) {
       hasSpeaker = true;
-      console.log('Speaker confirmed by watch hardware');
     }
+    console.log('Dictation audio capability:',hasSpeaker,'volume:',dict.VOLUME,'provider:',ttsBackend);
     refreshAgentInfo();
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
     if (ttsApiKey === null) ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
@@ -767,6 +791,13 @@ function fetchGeminiResponse(prompt, skipAudio) {
   if(geminiBackend!=='direct'){
     var agent=AgentPlugins.selected(Pebble,geminiBackend);
     responseRequest=AgentPlugins.dispatch(Pebble,agent,prompt).then(function(result){
+      if(agent.uuid===GEMINI_PLUGIN_UUID && result.provider){
+        var type=providerIcon(result.provider);
+        var shown=String(result.provider);
+        if(shown==='openai')shown='ChatGPT';
+        if(shown==='anthropic')shown='Claude';
+        sendAgentInfoReliable(shown.charAt(0).toUpperCase()+shown.slice(1),type);
+      }
       if(result.kind==='receipt')return {delivery_receipt:result.text};
       return {candidates:[{content:{parts:[{text:result.text}]}}]};
     });
