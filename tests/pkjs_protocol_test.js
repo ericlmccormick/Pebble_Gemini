@@ -21,7 +21,8 @@ const context = {
   Pebble,
   localStorage: {
     getItem: key => Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null,
-    setItem: (key, value) => { storage[key] = String(value); }
+    setItem: (key, value) => { storage[key] = String(value); },
+    removeItem: key => { delete storage[key]; }
   },
   require: id => id === './google_tts_stream' ? {create: () => ({stream: () => Promise.resolve()})} : Clay,
   console,
