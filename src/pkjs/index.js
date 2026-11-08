@@ -308,10 +308,6 @@ var clayConfig = [
     "items": apiKeysItems
   },
   {
-    "type": "section", 
-    "items": advancedSettingsItems
-  },
-  {
     "type": "section",
     "items": [
       { "type": "heading", "defaultValue": "Conversation & Privacy" },
