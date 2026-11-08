@@ -10,7 +10,14 @@
     "projectType": "plugin",
     "configPage": "src/config.html",
     "usesPermissions": [
-      "Internet"
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": [
+            "generativelanguage.googleapis.com"
+          ]
+        }
+      }
     ],
     "plugin": {
       "description": "Shared Gemini conversation backend for Pebble apps. Text in, text out; no TTS. User-supplied Gemini API key.",
