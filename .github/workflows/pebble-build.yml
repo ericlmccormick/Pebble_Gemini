@@ -66,6 +66,10 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The compiled PBW was copied to /tmp in the previous step.
+          # Remove ignored and untracked build products before checking out
+          # the download branch, which may contain historical build paths.
+          git clean -fdx >/dev/null
           if git ls-remote --exit-code --heads origin builds/plugin-previews >/dev/null; then
             git fetch origin builds/plugin-previews
             git switch -C builds/plugin-previews origin/builds/plugin-previews
