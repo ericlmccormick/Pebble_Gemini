@@ -32,6 +32,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check Pillow
           python tools/generate_wisp_icons.py
+          python tools/generate_agent_icons.py
           python tests/wisp_icon_test.py
       - name: Build all target platforms
         run: |

@@ -35,7 +35,10 @@ static TextLayer *s_status_layer;
 static Layer *s_idle_layer;                     
 static GBitmap *s_logo_bitmap;                  
 static BitmapLayer *s_logo_layer;               
-static TextLayer *s_title_layer;                
+static TextLayer *s_title_layer;
+static TextLayer *s_byline_layer;
+static char s_agent_title[32] = "WISP";
+static int s_agent_icon = 0;                
 static TextLayer *s_prompt_layer;               
 static Layer *s_arrow_layer;                    
 static Layer *s_pinwheel_layer;                 
@@ -139,7 +142,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
   GPoint center = grect_center_point(&bounds);  
   int radius = 9;                               
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, GColorWhite); 
   graphics_context_set_stroke_width(ctx, 3);    
   for(int i = 0; i < 4; i++) {                  
      int32_t angle = TRIG_MAX_ANGLE * (s_pinwheel_angle + i * 90) / 360; 
@@ -151,7 +154,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
 
 static void arrow_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, GColorWhite); 
   graphics_context_set_stroke_width(ctx, 3);    
   int y = bounds.size.h / 2;                    
   int x_start = 0;                              
@@ -544,7 +547,7 @@ static void set_ui_state(UIState state) {
       layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true); 
       layer_set_hidden(s_arrow_layer, false);   
       layer_set_hidden(s_pinwheel_layer, true);  
-      text_layer_set_text(s_prompt_layer, "Press Select\nto record"); 
+      text_layer_set_text(s_prompt_layer, "Select to talk"); 
       break;
     case UI_STATE_THINKING:                     
       layer_set_hidden(s_idle_layer, false);    
@@ -571,10 +574,45 @@ static void set_ui_state(UIState state) {
 // SECTION 9: APP MESSAGE COMMUNICATIONS RECEIVER & PARSING STRUCTURES
 // =========================================================================
 
+static uint32_t agent_resource_id(int agent) {
+  switch(agent){
+    case 1: return RESOURCE_ID_AGENT_GEMINI;
+    case 2: return RESOURCE_ID_AGENT_OPENAI;
+    case 3: return RESOURCE_ID_AGENT_CLAUDE;
+    case 4: return RESOURCE_ID_AGENT_GROK;
+    case 5: return RESOURCE_ID_AGENT_MUSE;
+    case 6: return RESOURCE_ID_AGENT_OPENROUTER;
+    case 7: return RESOURCE_ID_AGENT_DEEPSEEK;
+    default: return RESOURCE_ID_AGENT_WISP;
+  }
+}
+static void update_agent_display(const char *name, int agent) {
+  if (agent<0 || agent>7) agent=0;
+  if(name && name[0]){
+    snprintf(s_agent_title,sizeof(s_agent_title),"%s",name);
+    if(s_title_layer)text_layer_set_text(s_title_layer,s_agent_title);
+  }
+  if (agent!=s_agent_icon || !s_logo_bitmap) {
+    GBitmap *replacement=gbitmap_create_with_resource(agent_resource_id(agent));
+    if (replacement) {
+      if(s_logo_layer) bitmap_layer_set_bitmap(s_logo_layer,replacement);
+      if(s_logo_bitmap)gbitmap_destroy(s_logo_bitmap);
+      s_logo_bitmap=replacement;
+      s_agent_icon=agent;
+    }
+  }
+}
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
   Tuple *command_tuple = dict_find(iterator, MESSAGE_KEY_COMMAND); 
   if (!command_tuple) return;                   
 
+  if(strcmp(command_tuple->value->cstring,"AGENT_INFO")==0){
+    Tuple *name=dict_find(iterator,MESSAGE_KEY_AGENT_NAME);
+    Tuple *icon=dict_find(iterator,MESSAGE_KEY_AGENT_ICON);
+    update_agent_display(name?name->value->cstring:NULL,
+      icon?icon->value->int32:0);
+    return;
+  }
   if (strncmp(command_tuple->value->cstring, "TEXT_RESPONSE", 13) == 0) { 
     bool no_audio = false;
     #ifdef PBL_SPEAKER
@@ -764,7 +802,7 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
 // =========================================================================
 
 static void main_window_load(Window *window) {
-  window_set_background_color(window, GColorWhite); 
+  window_set_background_color(window, GColorBlack); 
   Layer *window_layer = window_get_root_layer(window); 
   GRect bounds = layer_get_bounds(window_layer); 
 
@@ -773,6 +811,8 @@ static void main_window_load(Window *window) {
 
   s_text_layer = text_layer_create(GRect(5, 5, bounds.size.w - 10, 2000));
   text_layer_set_text_alignment(s_text_layer, GTextAlignmentLeft);
+  text_layer_set_text_color(s_text_layer,GColorWhite);
+  text_layer_set_background_color(s_text_layer,GColorBlack);
   text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
 
   #if defined(PBL_ROUND) 
@@ -791,42 +831,46 @@ static void main_window_load(Window *window) {
 
   s_idle_layer = layer_create(bounds);
 
-  #if defined(PBL_ROUND) 
-    s_logo_layer = bitmap_layer_create(GRect((bounds.size.w / 2) - 24, 15, 48, 48));
-    s_title_layer = text_layer_create(GRect(0, 65, bounds.size.w, 35));
-    text_layer_set_text_alignment(s_title_layer, GTextAlignmentCenter); 
-
-    s_prompt_layer = text_layer_create(GRect(10, 105, bounds.size.w - 20, 50));
-    text_layer_set_text_alignment(s_prompt_layer, GTextAlignmentCenter); 
-
-    s_arrow_layer = layer_create(GRect(bounds.size.w - 30, 110, 20, 20));
-    s_pinwheel_layer = layer_create(GRect(bounds.size.w - 35, 105, 30, 30));
-  #else 
-    s_logo_layer = bitmap_layer_create(GRect(10, 15, 48, 48));
-    s_title_layer = text_layer_create(GRect(65, 20, bounds.size.w - 65, 40));
-    text_layer_set_text_alignment(s_title_layer, GTextAlignmentLeft); 
-
-    s_prompt_layer = text_layer_create(GRect(0, 80, bounds.size.w - 30, 50));
-    text_layer_set_text_alignment(s_prompt_layer, GTextAlignmentRight); 
-
-    s_arrow_layer = layer_create(GRect(bounds.size.w - 25, 95, 25, 20));
-    s_pinwheel_layer = layer_create(GRect(bounds.size.w - 30, 90, 30, 30));
+  // Balanced, centered branding for both round and rectangular Pebbles.
+  #if defined(PBL_ROUND)
+    s_logo_layer = bitmap_layer_create(GRect((bounds.size.w-40)/2,14,40,40));
+    s_title_layer = text_layer_create(GRect(8,58,bounds.size.w-16,32));
+    s_byline_layer = text_layer_create(GRect(8,91,bounds.size.w-16,20));
+    s_prompt_layer = text_layer_create(GRect(6,127,bounds.size.w-12,28));
+    s_arrow_layer = layer_create(GRect(bounds.size.w-28,130,20,20));
+    s_pinwheel_layer = layer_create(GRect(bounds.size.w-30,129,22,22));
+  #else
+    s_logo_layer = bitmap_layer_create(GRect((bounds.size.w-40)/2,8,40,40));
+    s_title_layer = text_layer_create(GRect(8,51,bounds.size.w-16,32));
+    s_byline_layer = text_layer_create(GRect(8,84,bounds.size.w-16,22));
+    s_prompt_layer = text_layer_create(GRect(8,122,bounds.size.w-16,28));
+    s_arrow_layer = layer_create(GRect(bounds.size.w-29,126,20,20));
+    s_pinwheel_layer = layer_create(GRect(bounds.size.w-31,126,22,22));
   #endif
-
-  s_logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_WISP_LOGO);
-  if (s_logo_bitmap) {
-    bitmap_layer_set_bitmap(s_logo_layer, s_logo_bitmap);
-    bitmap_layer_set_compositing_mode(s_logo_layer, GCompOpSet); 
+  s_logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_AGENT_WISP);
+  if(s_logo_bitmap){
+    bitmap_layer_set_bitmap(s_logo_layer,s_logo_bitmap);
+    bitmap_layer_set_compositing_mode(s_logo_layer,GCompOpSet);
   }
-  layer_add_child(s_idle_layer, bitmap_layer_get_layer(s_logo_layer)); 
-
-  text_layer_set_font(s_title_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
-  text_layer_set_text(s_title_layer, "WISP");
-  layer_add_child(s_idle_layer, text_layer_get_layer(s_title_layer));
-
-  text_layer_set_font(s_prompt_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
-  text_layer_set_text(s_prompt_layer, "Press Select\nto record");
-  layer_add_child(s_idle_layer, text_layer_get_layer(s_prompt_layer));
+  layer_add_child(s_idle_layer,bitmap_layer_get_layer(s_logo_layer));
+  text_layer_set_font(s_title_layer,fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_text_alignment(s_title_layer,GTextAlignmentCenter);
+  text_layer_set_text_color(s_title_layer,GColorWhite);
+  text_layer_set_background_color(s_title_layer,GColorClear);
+  text_layer_set_text(s_title_layer,s_agent_title);
+  layer_add_child(s_idle_layer,text_layer_get_layer(s_title_layer));
+  text_layer_set_font(s_byline_layer,fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  text_layer_set_text_alignment(s_byline_layer,GTextAlignmentCenter);
+  text_layer_set_text_color(s_byline_layer,GColorWhite);
+  text_layer_set_background_color(s_byline_layer,GColorClear);
+  text_layer_set_text(s_byline_layer,"via WISP");
+  layer_add_child(s_idle_layer,text_layer_get_layer(s_byline_layer));
+  text_layer_set_font(s_prompt_layer,fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_text_alignment(s_prompt_layer,GTextAlignmentCenter);
+  text_layer_set_text_color(s_prompt_layer,GColorWhite);
+  text_layer_set_background_color(s_prompt_layer,GColorClear);
+  text_layer_set_text(s_prompt_layer,"Select to talk");
+  layer_add_child(s_idle_layer,text_layer_get_layer(s_prompt_layer));
 
   layer_set_update_proc(s_arrow_layer, arrow_update_proc); 
   layer_add_child(s_idle_layer, s_arrow_layer);
@@ -871,7 +915,8 @@ static void main_window_unload(Window *window) {
     s_logo_bitmap = NULL;
   } 
   bitmap_layer_destroy(s_logo_layer);           
-  text_layer_destroy(s_title_layer);            
+  text_layer_destroy(s_title_layer);
+  text_layer_destroy(s_byline_layer);            
   text_layer_destroy(s_prompt_layer);           
   layer_destroy(s_arrow_layer);                 
   layer_destroy(s_pinwheel_layer);              

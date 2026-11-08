@@ -58,6 +58,17 @@ assert.equal(context.platformHasSpeaker('flint'), true, 'Pebble 2 Duo has a spea
 assert.equal(context.platformHasSpeaker(undefined), false);
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 const expectedPlatforms = ['basalt', 'chalk', 'diorite', 'flint', 'emery', 'gabbro'];
+assert.ok(manifest.pebble.messageKeys.includes('AGENT_ICON'));
+assert.ok(manifest.pebble.messageKeys.includes('AGENT_NAME'));
+for(const name of ["WISP","GEMINI","OPENAI","CLAUDE","GROK","MUSE","OPENROUTER","DEEPSEEK"]){
+ for(const platform of expectedPlatforms){
+  assert.equal(manifest.pebble.resources.media.filter(m=>m.name==='AGENT_'+name &&
+   m.targetPlatforms.includes(platform)).length,1,name+' missing on '+platform);
+ }
+}
+assert.match(program,/action:'get_config'/);
+assert.match(program,/refreshAgentInfo\(\)/);
+
 assert.deepEqual(manifest.pebble.targetPlatforms.slice().sort(), expectedPlatforms.slice().sort(),
   'Every microphone-equipped Pebble platform must be targeted');
 assert.equal(manifest.pebble.targetPlatforms.includes('aplite'), false,

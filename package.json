@@ -21,7 +21,9 @@
       "SEQ",
       "BUFFER_FREE",
       "SENTENCE_TOTAL",
-      "BUFFER_HINT"
+      "BUFFER_HINT",
+      "AGENT_ICON",
+      "AGENT_NAME"
     ],
     "projectType": "native",
     "resources": {
@@ -66,6 +68,166 @@
           "name": "logo25",
           "targetPlatforms": null,
           "type": "bitmap"
+        },
+        {
+          "file": "images/agent_wisp_color.png",
+          "name": "AGENT_WISP",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_wisp_mono.png",
+          "name": "AGENT_WISP",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_gemini_color.png",
+          "name": "AGENT_GEMINI",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_gemini_mono.png",
+          "name": "AGENT_GEMINI",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_openai_color.png",
+          "name": "AGENT_OPENAI",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_openai_mono.png",
+          "name": "AGENT_OPENAI",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_claude_color.png",
+          "name": "AGENT_CLAUDE",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_claude_mono.png",
+          "name": "AGENT_CLAUDE",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_grok_color.png",
+          "name": "AGENT_GROK",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_grok_mono.png",
+          "name": "AGENT_GROK",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_muse_color.png",
+          "name": "AGENT_MUSE",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_muse_mono.png",
+          "name": "AGENT_MUSE",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_openrouter_color.png",
+          "name": "AGENT_OPENROUTER",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_openrouter_mono.png",
+          "name": "AGENT_OPENROUTER",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
+        },
+        {
+          "file": "images/agent_deepseek_color.png",
+          "name": "AGENT_DEEPSEEK",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "basalt",
+            "emery"
+          ]
+        },
+        {
+          "file": "images/agent_deepseek_mono.png",
+          "name": "AGENT_DEEPSEEK",
+          "type": "bitmap",
+          "targetPlatforms": [
+            "chalk",
+            "diorite",
+            "flint",
+            "gabbro"
+          ]
         }
       ]
     },
@@ -82,7 +244,7 @@
     "watchapp": {
       "watchface": false
     },
-    "version": "2.0.3",
+    "version": "2.1.0",
     "manifestVersion": 2,
     "usesPermissions": [
       {
@@ -122,8 +284,12 @@
       {
         "name": "InvokeAction",
         "plugin": "80ee6780-856f-411f-954b-4553ba7f2af8"
+      },
+      {
+        "name": "GeminiRead",
+        "plugin": "2c5edc42-b096-4f76-b284-1f27907e6501"
       }
     ]
   },
-  "version": "2.0.3"
+  "version": "2.1.0"
 }

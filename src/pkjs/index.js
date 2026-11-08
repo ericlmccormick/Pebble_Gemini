@@ -497,6 +497,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
     var selectedAgent=String(settings.GEMINI_BACKEND.value||'plugin');
     geminiBackend=AgentPlugins.validChoice(Pebble,selectedAgent);
     localStorage.setItem('GEMINI_BACKEND',geminiBackend);
+    refreshAgentInfo();
   }
   if(settings.TTS_BACKEND){
     var selectedSpeechProvider=settings.TTS_BACKEND.value;
@@ -538,7 +539,59 @@ Pebble.addEventListener('webviewclosed', function(e) {
   }
 });
 
+
+// Agent icon protocol: 0 WISP, 1 Gemini, 2 ChatGPT/OpenAI,
+// 3 Claude/Anthropic, 4 Grok/xAI, 5 Muse, 6 OpenRouter, 7 DeepSeek.
+var agentInfoGeneration=0;
+function providerIcon(provider){
+  var ids={gemini:1,openai:2,anthropic:3,claude:3,xai:4,grok:4,
+    muse:5,openrouter:6,deepseek:7};
+  return ids[String(provider||'').toLowerCase()]||0;
+}
+function agentInfoPayload(name,icon){
+  return {COMMAND:'AGENT_INFO',AGENT_NAME:String(name||'WISP').slice(0,28),AGENT_ICON:icon|0};
+}
+function refreshAgentInfo(){
+  var generation=++agentInfoGeneration;
+  if(geminiBackend==='direct'){
+    Pebble.sendAppMessage(agentInfoPayload('Gemini',1));return;
+  }
+  var chosen=AgentPlugins.selected(Pebble,geminiBackend);
+  if(!chosen){
+    Pebble.sendAppMessage(agentInfoPayload('WISP',0));return;
+  }
+  if(chosen.uuid!==GEMINI_PLUGIN_UUID){
+    var aliases={};
+    aliases['3f97d5c5-bc28-48ba-b4af-e7ad7f6000f0']=['ChatGPT',2];
+    aliases['0d33014e-5d56-42ea-9665-3ebf182b4cfb']=['Claude',3];
+    aliases['80ee6780-856f-411f-954b-4553ba7f2af8']=['Grok Bot',4];
+    aliases['b8346592-cd59-4b83-9185-87d94e0734b0']=['Muse',5];
+    var displayed=aliases[chosen.uuid]||[chosen.name,0];
+    Pebble.sendAppMessage(agentInfoPayload(displayed[0],displayed[1]));return;
+  }
+  Pebble.sendAppMessage(agentInfoPayload('WISP',0));
+  if(typeof Pebble.invokeAction!=='function')return;
+  Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'get_config',args:{}})
+    .then(function(reply){
+      if(generation!==agentInfoGeneration)return;
+      var config={};
+      if(reply&&reply.ok&&typeof reply.text==='string'){
+        try{config=JSON.parse(reply.text);}catch(e){}
+      }
+      if(!config.provider)return;
+      var icon=providerIcon(config.provider);
+      var label=String(config.provider_name||config.provider);
+      if(label==='OpenAI')label='ChatGPT';
+      if(label==='Anthropic')label='Claude';
+      if(label==='xAI')label='Grok';
+      Pebble.sendAppMessage(agentInfoPayload(label,icon));
+    }).catch(function(err){
+      console.log('WISP provider info unavailable',err&&err.code||err&&err.message||err);
+    });
+}
+
 Pebble.addEventListener('ready', function() {
+  refreshAgentInfo();
   if (fontSize != 24) {
     Pebble.sendAppMessage({ 'COMMAND': 'UPDATE_FONT', 'FONT_SIZE': parseInt(fontSize) }); 
   }
@@ -557,6 +610,7 @@ Pebble.addEventListener('appmessage', function(e) {
   }
 
   if (dict.COMMAND === 'DICTATION') {
+    refreshAgentInfo();
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
     if (ttsApiKey === null) ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
 
