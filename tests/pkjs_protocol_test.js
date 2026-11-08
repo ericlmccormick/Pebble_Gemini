@@ -64,15 +64,15 @@ assert.equal(manifest.pebble.targetPlatforms.includes('aplite'), false,
   'Original Pebble has no microphone for dictation');
 for (const platform of expectedPlatforms) {
   const matches = manifest.pebble.resources.media.filter(media =>
-    media.name === 'IMAGE_GEMINI_LOGO' && media.targetPlatforms.includes(platform));
+    media.name === 'IMAGE_WISP_LOGO' && media.targetPlatforms.includes(platform));
   assert.equal(matches.length, 1, platform + ' must have exactly one logo bitmap');
 }
 assert.equal(manifest.pebble.resources.media.some(media =>
-  media.file === 'images/gemini_logo_diorite.png' &&
-  media.targetPlatforms.includes('flint')), true, 'Flint reuses the B/W logo');
+  media.file === 'images/WISP_mono_48.png' &&
+  media.targetPlatforms.includes('flint')), true, 'Flint uses the WISP monochrome logo');
 assert.equal(manifest.pebble.resources.media.some(media =>
-  media.file === 'images/gemini_logo_chalk.png' &&
-  media.targetPlatforms.includes('gabbro')), true, 'Round 2 uses the round logo');
+  media.file === 'images/WISP_mono_48.png' &&
+  media.targetPlatforms.includes('gabbro')), true, 'Round 2 uses the WISP monochrome logo');
 
 
 // Guard against the playback regression that queued silence directly
