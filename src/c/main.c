@@ -50,6 +50,9 @@ static char s_gemini_text[MAX_TEXT_LENGTH];
 static int s_appearance_mode = 0; // auto / day / night
 static time_t s_sunrise = 0, s_sunset = 0;
 static bool s_is_night = true;
+#ifdef PBL_SPEAKER
+static TextLayer *s_volume_text_layer;
+#endif
 
 static bool appearance_is_night(void) {
   if (s_appearance_mode == 1) return false;
@@ -103,7 +106,7 @@ static void appearance_tick(struct tm *tick_time, TimeUnits units_changed) {
 // =========================================================================
 
 #ifdef PBL_SPEAKER
-  static TextLayer *s_volume_text_layer;        
+  // Volume layer declared alongside the appearance controller. 
   static float s_volume = 1.0f;                 
   static AppTimer *s_volume_timer = NULL;       
   static uint8_t s_ring_buffer[RING_BUFFER_SIZE]; 
