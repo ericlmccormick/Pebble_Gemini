@@ -2,14 +2,23 @@
 // SECTION 1: LIBRARY IMPORT & INITIALIZATION
 // =========================================================================
 
-var Clay = require('@rebble/clay'); 
+var Clay = require('@rebble/clay');
+var GEMINI_PLUGIN_UUID='2c5edc42-b096-4f76-b284-1f27907e6501';
+var GOOGLE_TTS_PLUGIN_UUID='2c5edc42-b096-4f76-b284-1f27907e6502';
+var GoogleTtsStream=require('./google_tts_stream');
+function useStoredBackend(key,hasLegacyKey){return localStorage.getItem(key)||(hasLegacyKey?'direct':'plugin');}
+
 
 // =========================================================================
 // SECTION 2: STORAGE MEMORY RECOVERY & TOGGLE LOGIC
 // =========================================================================
 
 var geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || ""; 
-var ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";       
+var ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
+var geminiBackend=useStoredBackend('GEMINI_BACKEND',!!geminiApiKey);
+var ttsBackend=useStoredBackend('TTS_BACKEND',!!ttsApiKey);
+var geminiPluginConversationId=localStorage.getItem('GEMINI_PLUGIN_CONVERSATION_ID')||'';
+       
 var fontSize = localStorage.getItem("FONT_SIZE") || 24;          
 var customPersona = localStorage.getItem("CUSTOM_PERSONA") || ""; 
 
@@ -161,7 +170,9 @@ function apiErrorMessage(error, service) {
   
 
 var js_adpcm_valpred = 0;  
-var js_adpcm_index = 0;    
+var js_adpcm_index = 0;
+var googleTtsStream=GoogleTtsStream.create({Pebble:Pebble,pluginId:GOOGLE_TTS_PLUGIN_UUID,encodeADPCM:encodeADPCM});
+
 
 // =========================================================================
 // SECTION 6: ADPCM SIGNAL DICTIONARY TABLES
@@ -189,6 +200,12 @@ var indexTable = [
 // =========================================================================
 
 var apiKeysItems = [
+  {"type":"heading","defaultValue":"Connection providers"},
+  {"type":"select","messageKey":"GEMINI_BACKEND","label":"Gemini conversations","defaultValue":geminiBackend,
+   "options":[{"label":"Gemini Conversation plugin (preferred)","value":"plugin"},
+              {"label":"Direct Google API (legacy)","value":"direct"}]},
+  {"type":"text","defaultValue":"Plugin mode uses the Gemini Conversation plugin's API key and model settings. Install/configure the plugin in Pebble's Plugins menu; direct mode keeps the existing app-specific key."},
+
   { "type": "heading", "defaultValue": "API Keys" }, 
   {
     "type": "text", 
@@ -213,6 +230,14 @@ var apiKeysItems = [
 ];
 
 if (hasSpeaker) {
+  apiKeysItems.push({
+    "type":"select","messageKey":"TTS_BACKEND","label":"Speech provider","defaultValue":ttsBackend,
+    "options":[{"label":"Google Cloud TTS plugin (preferred)","value":"plugin"},
+               {"label":"Direct Google Cloud TTS (legacy)","value":"direct"}]
+  });
+  apiKeysItems.push({
+    "type":"text","defaultValue":"Google TTS plugin stores its own key and selected voice. Configure it in Pebble Plugins. The two plugins can be installed independently."
+  });
   apiKeysItems.push({
     "type": "toggle", 
     "messageKey": "ENABLE_TTS",
@@ -467,9 +492,23 @@ Pebble.addEventListener('webviewclosed', function(e) {
 
   if (settings.CLEAR_HISTORY && (settings.CLEAR_HISTORY.value === true || settings.CLEAR_HISTORY.value === 'true')) {
     cancelCurrentAudio();
+    if(geminiPluginConversationId&&typeof Pebble.invokeAction==='function'){
+      Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'clear_conversation',
+        args:{conversation_id:geminiPluginConversationId}}).catch(function(){});
+    }
+    geminiPluginConversationId='';
+    localStorage.removeItem('GEMINI_PLUGIN_CONVERSATION_ID');
     conversationHistory = [];
     localStorage.setItem('CHAT_HISTORY', '[]');
     console.log('Conversation history cleared');
+  }
+  if(settings.GEMINI_BACKEND){
+    geminiBackend=settings.GEMINI_BACKEND.value==='direct'?'direct':'plugin';
+    localStorage.setItem('GEMINI_BACKEND',geminiBackend);
+  }
+  if(settings.TTS_BACKEND){
+    ttsBackend=settings.TTS_BACKEND.value==='direct'?'direct':'plugin';
+    localStorage.setItem('TTS_BACKEND',ttsBackend);
   }
   if (settings.CUSTOM_PERSONA) {
     customPersona = settings.CUSTOM_PERSONA.value;
@@ -535,19 +574,19 @@ Pebble.addEventListener('appmessage', function(e) {
     var savedToggle = localStorage.getItem("ENABLE_TTS");
     if (savedToggle === "true" || savedToggle === "false") enableTts = savedToggle === "true";
 
-    // Strictly validate ONLY the Gemini API Key. TTS key is optional.
-    if (!geminiApiKey) {
+    // The plugins own credentials; direct requests retain their old keys.
+    if (geminiBackend==='direct' && !geminiApiKey) {
       sendErrorToWatch("Missing Gemini Key. Check settings.");
       return;
     }
 
-    if (hasSpeaker && enableTts && !ttsApiKey) {
+    if (hasSpeaker && enableTts && ttsBackend==='direct' && !ttsApiKey) {
       sendErrorToWatch("TTS enabled but missing TTS Key.");
       return;
     }
 
     var skipAudio = false; 
-    if (!hasSpeaker || !enableTts || !ttsApiKey) {
+    if (!hasSpeaker || !enableTts || (ttsBackend==='direct' && !ttsApiKey)) {
       skipAudio = true;    
     } else if (dict.VOLUME !== undefined && dict.VOLUME === 0) {
       skipAudio = true;    
@@ -589,15 +628,34 @@ function fetchGeminiResponse(prompt, skipAudio) {
   // DYNAMIC URL ROUTING
   var url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
 
-  requestJsonWithTimeout(url, {
+  var responseRequest;
+  if(geminiBackend==='plugin'){
+    if(typeof Pebble.invokeAction!=='function'){
+      sendErrorToWatch('Update Pebble phone app for plugin support.');
+      return;
+    }
+    var pluginArgs={text:prompt,instructions:systemText};
+    if(geminiPluginConversationId)pluginArgs.conversation_id=geminiPluginConversationId;
+    responseRequest=Pebble.invokeAction({plugin:GEMINI_PLUGIN_UUID,action:'conversation',args:pluginArgs})
+      .then(function(reply){
+        if(!reply||!reply.ok)throw Error('Gemini plugin unavailable: '+String(reply&&reply.message||'Install/configure plugin and grant permission'));
+        var data;
+        try{data=JSON.parse(reply.text||'{}');}catch(e){throw Error('Gemini plugin returned invalid JSON');}
+        if(data.conversation_id){
+          geminiPluginConversationId=data.conversation_id;
+          localStorage.setItem('GEMINI_PLUGIN_CONVERSATION_ID',data.conversation_id);
+        }
+        return {candidates:[{content:{parts:[{text:String(data.text||'')}]}}]};
+      });
+  }else responseRequest=requestJsonWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: systemText }] },
       contents: historyForRequest
     })
-  }, GEMINI_TIMEOUT_MS)
-  .then(function(data) {
+  }, GEMINI_TIMEOUT_MS);
+  responseRequest.then(function(data) {
     if (generation !== requestGeneration) return;
     if (data.candidates && data.candidates.length > 0) {
       var parts = data.candidates[0].content && data.candidates[0].content.parts || [];
@@ -607,8 +665,10 @@ function fetchGeminiResponse(prompt, skipAudio) {
         return;
       } 
       
-      conversationHistory = trimConversationHistory(historyForRequest.concat([{ role: "model", parts: [{ text: replyText }] }])); 
-      localStorage.setItem("CHAT_HISTORY", JSON.stringify(conversationHistory));  
+      if(geminiBackend==='direct'){
+        conversationHistory = trimConversationHistory(historyForRequest.concat([{ role: "model", parts: [{ text: replyText }] }]));
+        localStorage.setItem("CHAT_HISTORY", JSON.stringify(conversationHistory));
+      }  
 
       var cmd = skipAudio ? 'TEXT_RESPONSE_NO_AUDIO' : 'TEXT_RESPONSE_8_16';
 
@@ -716,6 +776,36 @@ function startTTSFetchLoop(generation, streamId) {
   if (generation !== requestGeneration || isFetchingTTS || !sentenceQueue.length) return;
   isFetchingTTS = true;
   var sentence = sentenceQueue.shift();
+  if(ttsBackend==='plugin'){
+    // HA-compatible WAV chunks, transported through the existing Gemini
+    // watch ACK/SEQ protocol. Never use HA AUDIO_RESET on this watch.
+    googleTtsStream.stream(sentence,{
+      cancelled:function(){return generation!==requestGeneration;},
+      onChunk:function(bytes,last,total){
+        return new Promise(function(resolve,reject){
+          function queueWhenReady(){
+            if(generation!==requestGeneration){reject(Error('Cancelled'));return;}
+            if(readyAudioQueue.length>=6){setTimeout(queueWhenReady,35);return;}
+            readyAudioQueue.push({bytes:bytes,sentenceEnd:last,sentenceTotal:total});
+            if(!isSendingBLE)startBLESendLoop(generation,streamId);
+            resolve();
+          }
+          queueWhenReady();
+        });
+      }
+    }).then(function(){
+      if(generation!==requestGeneration)return;
+      isFetchingTTS=false;
+      startTTSFetchLoop(generation,streamId);
+      maybeFinishAudioStream(generation,streamId);
+    }).catch(function(error){
+      if(generation!==requestGeneration)return;
+      console.log('Google TTS plugin audio failed:',String(error&&error.message||error));
+      cancelCurrentAudio();
+      Pebble.sendAppMessage({COMMAND:'AUDIO_ERROR',STREAM_ID:streamId});
+    });
+    return;
+  }
   var url = 'https://texttospeech.googleapis.com/v1/text:synthesize?key=' + ttsApiKey;
   var primaryVoice = normalizeTtsVoice(ttsVoice);
   var fallbackVoice = "en-US-Wavenet-F";
@@ -840,6 +930,8 @@ function handleAudioAck(dict) {
 var currentAudioData = null;
 var currentAudioCursor = 0;
 var currentAudioSeq = 0;
+var currentAudioEndSentence=true;
+var currentAudioSentenceTotal=0;
 
 function maybeFinishAudioStream(generation, streamId) {
   if (generation !== requestGeneration || streamEndSent || activeTransfer ||
@@ -863,7 +955,10 @@ function startBLESendLoop(generation, streamId) {
   }
   isSendingBLE = true;
   lastAckTime = 0; // Do not mistake a gap between TTS sentences for slow BLE.
-  currentAudioData = readyAudioQueue.shift();
+  var segment=readyAudioQueue.shift();
+  currentAudioData=Array.isArray(segment)?segment:segment.bytes;
+  currentAudioEndSentence=Array.isArray(segment)||segment.sentenceEnd===true;
+  currentAudioSentenceTotal=Array.isArray(segment)?currentAudioData.length:segment.sentenceTotal;
   currentAudioCursor = 0;
   dispatchNextAudio(generation, streamId);
 }
@@ -871,15 +966,22 @@ function startBLESendLoop(generation, streamId) {
 function dispatchNextAudio(generation, streamId) {
   if (generation !== requestGeneration || activeTransfer || !isSendingBLE) return;
   var remaining = currentAudioData.length - currentAudioCursor;
-  var isEnd = remaining <= 0;
+  var segmentEnded=remaining<=0;
+  if(segmentEnded && !currentAudioEndSentence){
+    // A 6000-byte verified WAV transport segment is NOT a sentence end.
+    isSendingBLE=false;
+    startBLESendLoop(generation,streamId);
+    return;
+  }
+  var isEnd=segmentEnded;
   var chunk = isEnd ? null : currentAudioData.slice(currentAudioCursor, currentAudioCursor + AUDIO_PACKET_BYTES);
   activeTransfer = {
     generation: generation, streamId: streamId,
-    seq: currentAudioSeq, chunk: chunk, end: isEnd, final: false, total: currentAudioData.length,
+    seq: currentAudioSeq, chunk: chunk, end: isEnd, final: false, total: currentAudioSentenceTotal,
     attempts: 0, timer: null
   };
   // DATA packets tell the watch this sentence's total bytes; it can avoid
   // starting a short sentence until every byte has arrived.
-  if (!isEnd) activeTransfer.total = currentAudioData.length;
+  if (!isEnd) activeTransfer.total = currentAudioSentenceTotal;
   sendPendingPacket(activeTransfer);
 }
