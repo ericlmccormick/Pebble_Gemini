@@ -6,6 +6,11 @@ const listeners={},items=new Map(),events={};
 function Clay(config,customizer){
   this.EVENTS={AFTER_BUILD:'afterBuild'};
   this.generateUrl=()=>'/settings';
+  this.setSettings=changes=>{
+    const saved=JSON.parse(storage['clay-settings']||'{}');
+    Object.assign(saved,changes);
+    storage['clay-settings']=JSON.stringify(saved);
+  };
   this.on=(name,callback)=>{events[name]=callback;};
   this.getItemByMessageKey=key=>items.get(key);
   config.forEach(section=>(section.items||[]).forEach(item=>{
@@ -19,7 +24,9 @@ function Clay(config,customizer){
       state
     });
   }));
-  customizer.call(this);
+  // Simulate Clay's real toSource/customFn behavior: execute in its OWN
+  // webview JS context, not in PebbleKit JS where backend globals exist.
+  vm.runInNewContext('(' + customizer.toString() + ')', {}).call(this);
   events.afterBuild();
 }
 function set(key,value){const item=items.get(key);assert.ok(item,key);item.state.value=value;if(item.state.change)item.state.change();}
@@ -32,6 +39,17 @@ const ctx={Pebble,localStorage,Date,Math,JSON,Promise,console,atob:()=>'',setTim
  require:(name)=>name==='./google_tts_stream'?{create:()=>({stream:()=>Promise.resolve()})}:Clay};
 const app=fs.readFileSync(path.join(root,'src/pkjs/index.js'),'utf8');
 vm.runInNewContext(app,ctx);
+// A stale Clay settings snapshot must not override the actual selected plugins.
+storage['clay-settings']=JSON.stringify({
+  GEMINI_BACKEND:'direct', TTS_BACKEND:'direct', ENABLE_TTS:true,
+  GEMINI_MODEL:'gemini-2.5-pro', TTS_VOICE:'en-US-Neural2-C'
+});
+listeners.showConfiguration();
+const synced=JSON.parse(storage['clay-settings']);
+assert.equal(synced.GEMINI_BACKEND,'plugin');
+assert.equal(synced.TTS_BACKEND,'plugin');
+assert.equal(synced.GEMINI_MODEL,'gemini-3.8-flash');
+assert.equal(synced.TTS_VOICE,'en-US-Wavenet-F');
 assert.equal(shown('GEMINI_API_KEY'),false);
 assert.equal(shown('GEMINI_MODEL'),false);
 assert.equal(shown('TTS_API_KEY'),false);
@@ -70,4 +88,4 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')
 const permissions=manifest.pebble.usesPermissions||[];
 assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6501'&&p.name==='GeminiConverse'));
 assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6502'&&p.name==='GoogleTtsSpeak'));
-console.log('PASS: provider-dependent Clay visibility and stable external plugin permissions');
+console.log('PASS: isolated Clay webview, legacy/plugin switching, persisted provider sync, and stable plugin permissions');

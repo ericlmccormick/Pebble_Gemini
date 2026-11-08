@@ -343,34 +343,48 @@ var clayConfig = [
 
 // This function is injected into the phone's webview to handle dynamic 
 // layout changes cleanly without relying on unstable capability tags.
-function customClay(){
-  var clayConfig=this;
-  function value(key,fallback){
-    var item=clayConfig.getItemByMessageKey(key);
-    if(!item)return fallback;
-    var v=item.get();
-    return v&&typeof v==='object'&&v.value!==undefined?v.value:(v===undefined?fallback:v);
+function customClay() {
+  // Clay serializes this function into a separate phone webview. It must NEVER
+  // reference PebbleKit JS globals such as geminiBackend or enableTts.
+  var page = this;
+
+  function fieldValue(key, fallback) {
+    var field = page.getItemByMessageKey(key);
+    if (!field) return fallback;
+    var value = field.get();
+    if (value && typeof value === 'object' && value.value !== undefined) {
+      value = value.value;
+    }
+    return value === undefined || value === null || value === '' ? fallback : value;
   }
-  function bool(v){return v===true||v===1||v==='true'||v==='1';}
-  function visible(key,show){
-    var item=clayConfig.getItemByMessageKey(key);
-    if(item){if(show)item.show();else item.hide();}
+
+  function fieldVisible(key, show) {
+    var field = page.getItemByMessageKey(key);
+    if (!field) return;  // Non-speaker watch profiles have no TTS fields.
+    if (show) field.show();
+    else field.hide();
   }
-  function updateProviderVisibility(){
-    var directGemini=String(value('GEMINI_BACKEND',geminiBackend))==='direct';
-    var directSpeech=String(value('TTS_BACKEND',ttsBackend))==='direct';
-    var speaking=bool(value('ENABLE_TTS',enableTts));
-    visible('GEMINI_API_KEY',directGemini);
-    visible('GEMINI_MODEL',directGemini);
-    visible('TTS_API_KEY',directSpeech&&speaking);
-    visible('TTS_VOICE',directSpeech&&speaking);
+
+  function updateVisibility() {
+    var geminiLegacy = String(fieldValue('GEMINI_BACKEND', 'plugin')) === 'direct';
+    var ttsLegacy = String(fieldValue('TTS_BACKEND', 'plugin')) === 'direct';
+    var speechValue = fieldValue('ENABLE_TTS', false);
+    var speechEnabled = speechValue === true || speechValue === 1 ||
+                        speechValue === 'true' || speechValue === '1';
+
+    // Plugin-owned keys, model and voice must be configured in their plugins.
+    fieldVisible('GEMINI_API_KEY', geminiLegacy);
+    fieldVisible('GEMINI_MODEL', geminiLegacy);
+    fieldVisible('TTS_API_KEY', ttsLegacy && speechEnabled);
+    fieldVisible('TTS_VOICE', ttsLegacy && speechEnabled);
   }
-  clayConfig.on(clayConfig.EVENTS.AFTER_BUILD,function(){
-    ['GEMINI_BACKEND','TTS_BACKEND','ENABLE_TTS'].forEach(function(key){
-      var item=clayConfig.getItemByMessageKey(key);
-      if(item)item.on('change',updateProviderVisibility);
+
+  page.on(page.EVENTS.AFTER_BUILD, function() {
+    ['GEMINI_BACKEND', 'TTS_BACKEND', 'ENABLE_TTS'].forEach(function(key) {
+      var field = page.getItemByMessageKey(key);
+      if (field) field.on('change', updateVisibility);
     });
-    updateProviderVisibility();
+    updateVisibility();
   });
 }
 
@@ -445,7 +459,17 @@ function lowPassFilter(samples) {
 // =========================================================================
 
 Pebble.addEventListener('showConfiguration', function() {
-  Pebble.openURL(clay.generateUrl()); 
+  // Clay can load an older 'clay-settings' snapshot before defaults. Keep its
+  // selected provider and legacy model/voice fields aligned with our saved
+  // app settings so plugin mode is respected every time the webview opens.
+  clay.setSettings({
+    GEMINI_BACKEND: geminiBackend,
+    TTS_BACKEND: ttsBackend,
+    ENABLE_TTS: enableTts,
+    GEMINI_MODEL: geminiModel,
+    TTS_VOICE: ttsVoice
+  });
+  Pebble.openURL(clay.generateUrl());
 });
 
 Pebble.addEventListener('webviewclosed', function(e) {

@@ -20,3 +20,8 @@ This feature branch contains the **watch application only**. The plugins have mo
 - Build the app on the `feature/gemini-plugin-integration` branch. CI builds six native platforms and publishes the **watch app PBW only** to `builds/plugin-previews`.
 - The original `feature/gemini-conversation-plugin` and `feature/google-tts-plugin` branches in this repository are historical staging snapshots; do not publish new plugin releases from them.
 - Cloud usage is billed separately from personal Gemini subscriptions. Plugin permissions require a compatible Pebble phone app. These are development builds pending physical watch validation.
+
+## 1.6.2: Clay webview-only visibility fix
+The Clay settings callback is serialized into its own browser context. Earlier app code accidentally referenced outer PebbleKit JS variables (`geminiBackend`, `ttsBackend`, `enableTts`) from that callback and failed before hiding any fields. The callback is now fully self-contained and driven only by actual Clay selector values. On opening settings, the app also synchronizes provider selections from its saved state into Clay's cached settings so stale legacy settings cannot override selected plugins.
+
+The regression test now executes the callback in a separate JavaScript VM, checks plugin/legacy changes live, checks speaker toggling, and verifies direct API credentials aren't overwritten while hidden. Plugin UUIDs and the established audio protocol are unchanged.
