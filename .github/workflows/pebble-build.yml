@@ -68,6 +68,7 @@ jobs:
           unzip -t /tmp/pebble-plugin-previews/WISP_preview.pbw >/dev/null
           cp branding/WISP_color_144.png branding/WISP_color_80.png branding/WISP_mono_144.png branding/WISP_mono_80.png /tmp/pebble-plugin-previews/
           cp resources/images/WISP_menu_25.png /tmp/pebble-plugin-previews/
+          cp resources/images/agent_*_color.png resources/images/agent_*_mono.png /tmp/pebble-plugin-previews/
       - name: Publish preview files without ZIPs
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/gemini-plugin-integration'
         run: |
@@ -96,9 +97,10 @@ jobs:
           cp /tmp/pebble-plugin-previews/WISP_mono_144.png ./
           cp /tmp/pebble-plugin-previews/WISP_mono_80.png ./
           cp /tmp/pebble-plugin-previews/WISP_menu_25.png ./
+          cp /tmp/pebble-plugin-previews/agent_*_color.png /tmp/pebble-plugin-previews/agent_*_mono.png ./
           printf 'WISP (Wrist Intelligence & Speech Portal) watch app preview. Plugins are maintained in ericlmccormick/Pebble-Gemini-plugin and ericlmccormick/Pebble-Google-TTS-plugin.\n' > README.txt
           git add -u
-          git add WISP_preview.pbw README.txt WISP_color_144.png WISP_color_80.png WISP_mono_144.png WISP_mono_80.png WISP_menu_25.png
+          git add WISP_preview.pbw README.txt WISP_color_144.png WISP_color_80.png WISP_mono_144.png WISP_mono_80.png WISP_menu_25.png agent_*_color.png agent_*_mono.png
           if ! git diff --cached --quiet; then
             git commit -m "build: plugin previews from ${GITHUB_SHA}"
             git push origin HEAD:builds/plugin-previews
