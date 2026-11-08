@@ -67,6 +67,13 @@ for(const name of ["WISP","GEMINI","OPENAI","CLAUDE","GROK","MUSE","OPENROUTER",
  }
 }
 assert.match(program,/action:'get_config'/);
+assert.doesNotMatch(program,/if\s*\(\s*result\.kind\s*===\s*['"]receipt['"]\s*\)\s*\{\s*[\s\S]*?delivery_receipt/,
+  'delivery receipts must not bypass text-to-speech after being displayed');
+assert.doesNotMatch(program,/if\s*\(\s*data\.delivery_receipt\s*\)/,
+  'no special text-only receipt path may bypass TTS');
+assert.match(program,/var rawSentences = displayText\.match/,
+  'TTS must receive the same content displayed on the watch');
+
 assert.match(program,/refreshAgentInfo\(\)/);
 
 assert.deepEqual(manifest.pebble.targetPlatforms.slice().sort(), expectedPlatforms.slice().sort(),
