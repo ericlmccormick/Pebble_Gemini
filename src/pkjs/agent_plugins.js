@@ -47,10 +47,19 @@ function selected(Pebble,value){
   return catalogue(Pebble).filter(function(p){return p.uuid===id;})[0]||null;
 }
 function fullAnswer(reply,agent){
-  return agent.uuid===UNIVERSAL_ID&&reply.reply_type==='assistant'&&
-    (reply.status==='completed'||reply.status==='incomplete')&&reply.received===true&&
-    reply.validation&&reply.validation.provider_http_ok===true&&
-    reply.validation.reply_text_present===true&&typeof reply.text==='string'&&!!reply.text.trim();
+  if(!reply||agent.uuid!==UNIVERSAL_ID||typeof reply.text!=='string'||!reply.text.trim())return false;
+  // The agent action's optional validation metadata must not turn a genuine
+  // assistant answer into a send-only delivery receipt. That regression began
+  // when the standard send_to_agent integration replaced v1.6.3 conversation.
+  if(reply.received===false||reply.validation&&(
+      reply.validation.provider_http_ok===false||
+      reply.validation.reply_text_present===false))return false;
+  if(reply.reply_type==='assistant'&&
+      (reply.status===undefined||reply.status==='completed'||reply.status==='incomplete'))return true;
+  // Also accept an explicitly delivered, completed assistant response from
+  // providers which omit reply_type. Never promote bare 'sent' receipts.
+  return reply.received===true&&reply.status==='completed'&&
+      typeof reply.provider==='string'&&!!reply.provider;
 }
 function dispatch(Pebble,agent,prompt){
   if(!agent)return Promise.reject(Error('Selected agent is not installed. Reopen WISP settings.'));
