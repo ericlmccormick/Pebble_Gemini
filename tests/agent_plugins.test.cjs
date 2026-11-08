@@ -47,6 +47,23 @@ const complete={ok:true,text:'The real answer',reply_type:'assistant',status:'co
  assert.equal(receipt.kind,'receipt');
  const bad=await Agent.dispatch({invokeAction:async()=>({...complete,received:false})},chosen,'No');
  assert.equal(bad.kind,'receipt');
+ const lean=await Agent.dispatch({invokeAction:async()=>({
+   ok:true,text:'A spoken answer',reply_type:'assistant',status:'completed',received:true,
+   provider:'gemini'})},chosen,'Hello');
+ assert.equal(lean.kind,'answer','real answers must not require validation fields');
+ const missingReceived=await Agent.dispatch({invokeAction:async()=>({
+   ok:true,text:'A spoken answer',reply_type:'assistant',status:'completed'})},chosen,'Hello');
+ assert.equal(missingReceived.kind,'answer','optional received flag must not suppress TTS');
+ const leanFallback=await Agent.dispatch({invokeAction:async()=>({
+   ok:true,text:'A spoken answer',status:'completed',received:true,provider:'gemini'})},chosen,'Hello');
+ assert.equal(leanFallback.kind,'answer');
+ const bareReceipt=await Agent.dispatch({invokeAction:async()=>({
+   ok:true,text:'Message delivered',received:true,status:'completed'})},chosen,'Hello');
+ assert.equal(bareReceipt.kind,'receipt','do not speak send-only acknowledgement');
+ const failedProvider=await Agent.dispatch({invokeAction:async()=>({
+   ...complete,validation:{provider_http_ok:false,reply_text_present:true}})},chosen,'Hello');
+ assert.equal(failedProvider.kind,'receipt','explicit provider failures are not speech');
+
  let calls=0;
  await assert.rejects(Agent.dispatch({invokeAction:async()=>{calls++;return {ok:false,message:'Unknown delivery'};}},chosen,'Hi'),/Unknown delivery/);
  assert.equal(calls,1);
