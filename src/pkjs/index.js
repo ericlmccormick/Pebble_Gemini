@@ -201,120 +201,88 @@ var indexTable = [
 // SECTION 7: DYNAMIC MENU CONFIGURATION TREE
 // =========================================================================
 
+// The plugin owns credentials, model and voice settings when selected.
+// App-only controls (persona, speaker on/off, font size) remain visible.
 var apiKeysItems = [
-  {"type":"heading","defaultValue":"Connection providers"},
-  {"type":"select","messageKey":"GEMINI_BACKEND","label":"Gemini conversations","defaultValue":geminiBackend,
-   "options":[{"label":"Gemini Conversation plugin (preferred)","value":"plugin"},
-              {"label":"Direct Google API (legacy)","value":"direct"}]},
-  {"type":"text","defaultValue":"Plugin mode uses the Gemini Conversation plugin's API key and model settings. Install/configure the plugin in Pebble's Plugins menu; direct mode keeps the existing app-specific key."},
-
-  { "type": "heading", "defaultValue": "API Keys" }, 
+  {type:'heading',defaultValue:'Service providers'},
   {
-    "type": "text", 
-    "defaultValue": "🔒 For security, your saved keys are hidden. If you previously entered and saved your keys, they are still stored on your device even though these boxes appear blank. Only enter keys here if you need to update them."
+    type:'select',messageKey:'GEMINI_BACKEND',label:'Gemini conversations',
+    defaultValue:geminiBackend,
+    description:'Plugin: set the key, model and pricing in Gemini Conversation plugin settings. Direct: use this app\'s legacy API settings.',
+    options:[
+      {label:'Gemini Conversation plugin (recommended)',value:'plugin'},
+      {label:'Direct Gemini API (legacy)',value:'direct'}
+    ]
   },
   {
-    "type": "text", 
-    "defaultValue": "Need help getting your API keys?<br>Open this link in your phone's browser:<br><b>tinyurl.com/PebbleGemini</b>"
+    type:'input',messageKey:'GEMINI_API_KEY',label:'Gemini API key (direct mode only)',
+    description:geminiApiKey?'Direct key already saved locally. Leave blank to keep it.':'Only required when using Direct Gemini API.',
+    attributes:{
+      type:'password',autocorrect:'off',autocapitalize:'off',
+      placeholder:geminiApiKey?'Existing direct key saved':'Paste Gemini Developer API key'
+    }
   },
   {
-    "type": "input", 
-    "messageKey": "GEMINI_API_KEY",
-    "label": "Gemini API Key (Required)",
-    "description": geminiApiKey ? "✅ Status: Key saved locally in PebbleKit JS storage." : "❌ Status: No key saved. App will not function.",
-    "attributes": {
-      "type": "text",
-      "autocorrect": "off",
-      "autocapitalize": "off",
-      "placeholder": geminiApiKey ? "••••••••••••••••••••" : "Paste Gemini Key Here"
-    }
-  }
-];
-
-if (hasSpeaker) {
-  apiKeysItems.push({
-    "type":"select","messageKey":"TTS_BACKEND","label":"Speech provider","defaultValue":ttsBackend,
-    "options":[{"label":"Google Cloud TTS plugin (preferred)","value":"plugin"},
-               {"label":"Direct Google Cloud TTS (legacy)","value":"direct"}]
-  });
-  apiKeysItems.push({
-    "type":"text","defaultValue":"Google TTS plugin stores its own key and selected voice. Configure it in Pebble Plugins. The two plugins can be installed independently."
-  });
-  apiKeysItems.push({
-    "type": "toggle", 
-    "messageKey": "ENABLE_TTS",
-    "label": "Enable Voice Responses (TTS)",
-    "defaultValue": enableTts,
-    "description": "Turn on to have Gemini speak responses. Requires a Google Cloud TTS key."
-  });
-
-  apiKeysItems.push({
-    "type": "input", 
-    "messageKey": "TTS_API_KEY",
-    "label": "Google Cloud TTS API Key",
-    "description": ttsApiKey ? "✅ Status: Key saved locally." : "ℹ️ Status: No key saved.",
-    "attributes": {
-      "type": "text",
-      "autocorrect": "off",
-      "autocapitalize": "off",
-      "placeholder": ttsApiKey ? "••••••••••••••••••••" : "Paste TTS Key Here"
-    }
-  });
-}
-
-var advancedSettingsItems = [
-  { "type": "heading", "defaultValue": "Advanced API Settings" },
-  {
-    "type": "select", 
-    "messageKey": "GEMINI_MODEL",
-    "label": "Gemini Model Version",
-    "defaultValue": geminiModel,
-    "description": "Select the generation engine. Default is Gemini 3.8 Flash.",
-    "options": [ 
-      { "label": "Gemini 3.8 Flash (Default)", "value": "gemini-3.8-flash" },
-      { "label": "Gemini 3.7 Flash (Alias)", "value": "gemini-3.7-flash" },
-      { "label": "Gemini 3.6 Flash", "value": "gemini-3.6-flash" },
-      { "label": "Gemini 3.5 Flash", "value": "gemini-3.5-flash" },
-      { "label": "Gemini 3.5 Flash-Lite", "value": "gemini-3.5-flash-lite" },
-      { "label": "Gemini 3.1 Pro", "value": "gemini-3.1-pro" },
-      { "label": "Gemini 3.1 Flash-Lite", "value": "gemini-3.1-flash-lite" },
-      { "label": "Gemini 3.0 Pro", "value": "gemini-3.0-pro" },
-      { "label": "Gemini 3.0 Flash", "value": "gemini-3.0-flash" }
+    type:'select',messageKey:'GEMINI_MODEL',label:'Gemini model (direct mode only)',
+    defaultValue:geminiModel,
+    description:'In plugin mode, this setting is controlled by the Gemini Conversation plugin.',
+    options:[
+      {label:'Gemini 3.8 Flash',value:'gemini-3.8-flash'},
+      {label:'Gemini 3.7 Flash',value:'gemini-3.7-flash'},
+      {label:'Gemini 3.6 Flash',value:'gemini-3.6-flash'},
+      {label:'Gemini 3.5 Flash',value:'gemini-3.5-flash'},
+      {label:'Gemini 3.5 Flash-Lite',value:'gemini-3.5-flash-lite'},
+      {label:'Gemini 3.1 Pro (Preview)',value:'gemini-3.1-pro-preview'},
+      {label:'Gemini 3.1 Flash-Lite',value:'gemini-3.1-flash-lite'},
+      {label:'Gemini 3 Flash (Preview)',value:'gemini-3-flash-preview'},
+      {label:'Gemini 2.5 Pro',value:'gemini-2.5-pro'},
+      {label:'Gemini 2.5 Flash',value:'gemini-2.5-flash'},
+      {label:'Gemini 2.5 Flash-Lite',value:'gemini-2.5-flash-lite'}
     ]
   }
 ];
-
-if (hasSpeaker) {
-  advancedSettingsItems.push({
-    "type": "select",
-    "messageKey": "TTS_VOICE",
-    "label": "Google TTS Voice (cost tiers)",
-    "defaultValue": ttsVoice,
-    "description": "WaveNet $ = low cost; Neural2 $$ = medium; Chirp 3 HD $$$ = highest. Billing is based on generated characters, not a one-time fee.",
-    "options": [
-      { "label": "WaveNet F - Female ($, default)", "value": "en-US-Wavenet-F" },
-      { "label": "WaveNet C - Female ($)", "value": "en-US-Wavenet-C" },
-      { "label": "WaveNet D - Male ($)", "value": "en-US-Wavenet-D" },
-      { "label": "Neural2 C - Female ($$)", "value": "en-US-Neural2-C" },
-      { "label": "Neural2 F - Female ($$)", "value": "en-US-Neural2-F" },
-      { "label": "Neural2 D - Male ($$)", "value": "en-US-Neural2-D" },
-      { "label": "Chirp 3 HD Kore - Female ($$$)", "value": "en-US-Chirp3-HD-Kore" },
-      { "label": "Chirp 3 HD Aoede - Female ($$$)", "value": "en-US-Chirp3-HD-Aoede" },
-      { "label": "Chirp 3 HD Leda - Female ($$$)", "value": "en-US-Chirp3-HD-Leda" },
-      { "label": "Chirp 3 HD Zephyr - Female ($$$)", "value": "en-US-Chirp3-HD-Zephyr" },
-      { "label": "Chirp 3 HD Charon - Male ($$$)", "value": "en-US-Chirp3-HD-Charon" },
-      { "label": "Chirp 3 HD Puck - Male ($$$)", "value": "en-US-Chirp3-HD-Puck" }
+if(hasSpeaker){
+  apiKeysItems.push({
+    type:'toggle',messageKey:'ENABLE_TTS',label:'Enable spoken responses',
+    defaultValue:enableTts,
+    description:'This turns watch speech on or off, regardless of which speech provider you use.'
+  });
+  apiKeysItems.push({
+    type:'select',messageKey:'TTS_BACKEND',label:'Speech provider',
+    defaultValue:ttsBackend,
+    description:'Plugin: choose the voice and API key in Google Cloud TTS plugin settings. Direct: use the legacy fields below.',
+    options:[
+      {label:'Google Cloud TTS plugin (recommended)',value:'plugin'},
+      {label:'Direct Google Cloud TTS (legacy)',value:'direct'}
     ]
   });
-  advancedSettingsItems.push({
-    "type": "text",
-    "defaultValue": "Relative TTS cost per 1M characters after Google's monthly free allowance: WaveNet $ ($4); Neural2 $$ ($16); Chirp 3 HD $$$ ($30). Studio voices removed. Charges depend on usage and Google's current pricing."
+  apiKeysItems.push({
+    type:'input',messageKey:'TTS_API_KEY',label:'Cloud TTS key (direct mode only)',
+    description:ttsApiKey?'Direct key already saved locally. Leave blank to keep it.':'Required only when using Direct Cloud TTS.',
+    attributes:{
+      type:'password',autocorrect:'off',autocapitalize:'off',
+      placeholder:ttsApiKey?'Existing direct key saved':'Paste Google Cloud TTS API key'
+    }
   });
-  advancedSettingsItems.push({
-    "type": "text",
-    "defaultValue": "Audio: 8 kHz PCM16 playback with 4-bit IMA-ADPCM streaming. The previous 16 kHz / 8-bit modes were not supported by the watch decoder."
+  apiKeysItems.push({
+    type:'select',messageKey:'TTS_VOICE',label:'TTS voice (direct mode only)',
+    defaultValue:ttsVoice,
+    description:'In plugin mode, voice and pricing are managed by the Google Cloud TTS plugin.',
+    options:[
+      {label:'WaveNet F · $',value:'en-US-Wavenet-F'},
+      {label:'WaveNet C · $',value:'en-US-Wavenet-C'},
+      {label:'WaveNet D · $',value:'en-US-Wavenet-D'},
+      {label:'Neural2 F · $$',value:'en-US-Neural2-F'},
+      {label:'Neural2 C · $$',value:'en-US-Neural2-C'},
+      {label:'Neural2 D · $$',value:'en-US-Neural2-D'},
+      {label:'Chirp 3 HD Kore · $$$',value:'en-US-Chirp3-HD-Kore'},
+      {label:'Chirp 3 HD Aoede · $$$',value:'en-US-Chirp3-HD-Aoede'},
+      {label:'Chirp 3 HD Leda · $$$',value:'en-US-Chirp3-HD-Leda'},
+      {label:'Chirp 3 HD Zephyr · $$$',value:'en-US-Chirp3-HD-Zephyr'},
+      {label:'Chirp 3 HD Charon · $$$',value:'en-US-Chirp3-HD-Charon'},
+      {label:'Chirp 3 HD Puck · $$$',value:'en-US-Chirp3-HD-Puck'}
+    ]
   });
-
 }
 
 var clayConfig = [
@@ -347,7 +315,7 @@ var clayConfig = [
     "type": "section",
     "items": [
       { "type": "heading", "defaultValue": "Conversation & Privacy" },
-      { "type": "text", "defaultValue": "The last three Q&A pairs are saved locally on this phone. Questions are sent to Google Gemini, and speech text to Google Cloud TTS. API keys are stored in PebbleKit local storage, not app-encrypted. Cloud API usage may incur charges." },
+      { "type": "text", "defaultValue": "Your current provider handles model and voice settings. Plugin credentials are stored in Pebble secure storage; direct-mode keys remain in legacy app storage. Conversation history is stored on the phone. API usage may incur charges." },
       { "type": "toggle", "messageKey": "CLEAR_HISTORY", "label": "Clear Conversation History on Save",
         "defaultValue": false, "description": "Clear prior questions and answers without removing API keys, voice, or settings." }
     ]
@@ -379,36 +347,34 @@ var clayConfig = [
 
 // This function is injected into the phone's webview to handle dynamic 
 // layout changes cleanly without relying on unstable capability tags.
-function customClay() {
-  var clayConfig = this;
-
-  function toggleTTSVisibility() {
-    var ttsToggle = clayConfig.getItemByMessageKey('ENABLE_TTS');
-    var ttsKey = clayConfig.getItemByMessageKey('TTS_API_KEY');
-    var ttsVoice = clayConfig.getItemByMessageKey('TTS_VOICE');
-
-
-    // Only process visibility if the components exist on this hardware profile
-    if (ttsToggle) {
-      if (ttsToggle.get()) {
-        if (ttsKey) ttsKey.show();
-        if (ttsVoice) ttsVoice.show();
-
-      } else {
-        if (ttsKey) ttsKey.hide(); // Hides the fields, but preserves their saved text!
-        if (ttsVoice) ttsVoice.hide();
-
-      }
-    }
+function customClay(){
+  var clayConfig=this;
+  function value(key,fallback){
+    var item=clayConfig.getItemByMessageKey(key);
+    if(!item)return fallback;
+    var v=item.get();
+    return v&&typeof v==='object'&&v.value!==undefined?v.value:(v===undefined?fallback:v);
   }
-
-  // Hook into the after-build event to ensure DOM exists before we modify it
-  clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
-    var ttsToggle = clayConfig.getItemByMessageKey('ENABLE_TTS');
-    if (ttsToggle) {
-      ttsToggle.on('change', toggleTTSVisibility);
-      toggleTTSVisibility(); // Force UI update immediately on page load
-    }
+  function bool(v){return v===true||v===1||v==='true'||v==='1';}
+  function visible(key,show){
+    var item=clayConfig.getItemByMessageKey(key);
+    if(item){if(show)item.show();else item.hide();}
+  }
+  function updateProviderVisibility(){
+    var directGemini=String(value('GEMINI_BACKEND',geminiBackend))==='direct';
+    var directSpeech=String(value('TTS_BACKEND',ttsBackend))==='direct';
+    var speaking=bool(value('ENABLE_TTS',enableTts));
+    visible('GEMINI_API_KEY',directGemini);
+    visible('GEMINI_MODEL',directGemini);
+    visible('TTS_API_KEY',directSpeech&&speaking);
+    visible('TTS_VOICE',directSpeech&&speaking);
+  }
+  clayConfig.on(clayConfig.EVENTS.AFTER_BUILD,function(){
+    ['GEMINI_BACKEND','TTS_BACKEND','ENABLE_TTS'].forEach(function(key){
+      var item=clayConfig.getItemByMessageKey(key);
+      if(item)item.on('change',updateProviderVisibility);
+    });
+    updateProviderVisibility();
   });
 }
 
@@ -517,7 +483,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem("CUSTOM_PERSONA", customPersona); 
   }
 
-  if (settings.GEMINI_API_KEY && settings.GEMINI_API_KEY.value !== "") {
+  if (geminiBackend==='direct' && settings.GEMINI_API_KEY && settings.GEMINI_API_KEY.value !== "") {
     geminiApiKey = settings.GEMINI_API_KEY.value;
     localStorage.setItem("GEMINI_API_KEY", geminiApiKey); 
   }
@@ -528,17 +494,17 @@ Pebble.addEventListener('webviewclosed', function(e) {
   }
 
   // An intentionally blank Clay field must not erase a previously saved key.
-  if (settings.TTS_API_KEY && settings.TTS_API_KEY.value) {
+  if (ttsBackend==='direct' && settings.TTS_API_KEY && settings.TTS_API_KEY.value) {
     ttsApiKey = settings.TTS_API_KEY.value;
     localStorage.setItem("TTS_API_KEY", ttsApiKey);
   }
 
-  if (settings.GEMINI_MODEL) {
+  if (geminiBackend==='direct' && settings.GEMINI_MODEL) {
     geminiModel = settings.GEMINI_MODEL.value || "gemini-3.8-flash"; 
     localStorage.setItem("GEMINI_MODEL", geminiModel); 
   }
 
-  if (settings.TTS_VOICE) {
+  if (ttsBackend==='direct' && settings.TTS_VOICE) {
     ttsVoice = normalizeTtsVoice(settings.TTS_VOICE.value || "en-US-Wavenet-F"); 
     localStorage.setItem("TTS_VOICE", ttsVoice); 
   }
