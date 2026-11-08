@@ -2,7 +2,7 @@ name: Pebble native six-platform build
 
 on:
   push:
-    branches: [main, gemini-reliability-review-2026-11-03]
+    branches: [main, gemini-reliability-review-2026-11-03, 'feature/**']
   pull_request:
   workflow_dispatch:
 

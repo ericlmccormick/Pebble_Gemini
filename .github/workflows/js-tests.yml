@@ -2,7 +2,7 @@ name: Pebble Gemini JS regression tests
 
 on:
   push:
-    branches: [main, gemini-reliability-review-2026-11-03]
+    branches: [main, gemini-reliability-review-2026-11-03, 'feature/**']
   pull_request:
 
 jobs:
@@ -17,5 +17,9 @@ jobs:
         run: |
           node --check src/pkjs/index.js
           node --check tests/pkjs_protocol_test.js
+          node --check src/pkjs/google_tts_stream.js
+          node --check tests/google_tts_adapter.test.cjs
       - name: Test audio protocol and release hardening
-        run: node tests/pkjs_protocol_test.js
+        run: |
+          node tests/pkjs_protocol_test.js
+          node tests/google_tts_adapter.test.cjs

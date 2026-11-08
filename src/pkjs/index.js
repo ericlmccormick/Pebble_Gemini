@@ -162,6 +162,8 @@ function requestJsonWithTimeout(url, options, timeoutMs) {
 function apiErrorMessage(error, service) {
   var message = String(error && error.message || error || '').toLowerCase();
   if (message.indexOf('timed out') >= 0) return service + ' timed out. Try again.';
+  if (/plugin unavailable|plugin support|install\/configure plugin|plugin.*permission|unknown plugin/.test(message))
+    return 'Install/configure the '+(service==='Gemini'?'Gemini Conversation':'Google TTS')+' plugin and grant permissions.';
   if (/api.key|permission.denied|unauthenticated|401|403/.test(message)) return service + ' key/access error. Check settings.';
   if (/quota|rate.limit|resource.exhausted|429/.test(message)) return service + ' usage limit reached. Try later.';
   if (message.indexOf('voice') >= 0) return 'Voice unavailable. Select WaveNet F.';
