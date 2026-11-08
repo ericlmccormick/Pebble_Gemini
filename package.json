@@ -82,7 +82,7 @@
     "watchapp": {
       "watchface": false
     },
-    "version": "1.6.2",
+    "version": "1.6.3",
     "manifestVersion": 2,
     "usesPermissions": [
       {
@@ -113,5 +113,5 @@
       }
     ]
   },
-  "version": "1.6.2"
+  "version": "1.6.3"
 }

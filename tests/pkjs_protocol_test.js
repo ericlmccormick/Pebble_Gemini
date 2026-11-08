@@ -221,3 +221,22 @@ async function checkNetwork() {
   console.log('PASS: WAV, ADPCM, protocol, final stream marker, voice migration, history privacy, timeouts, settings');
 }
 checkNetwork().catch(error => { console.error(error); process.exitCode = 1; });
+
+// Regression: new installs favor both plugins; old disabled speech migrates to None.
+assert.equal(context.geminiBackend,'plugin');
+assert.equal(context.ttsBackend,'plugin');
+assert.equal(storage.TTS_BACKEND,'plugin');
+assert.equal(storage.TTS_PROVIDER_MIGRATED_V2,'true');
+function migrateTest(saved){
+ const local=Object.assign({},saved);
+ const providerFn=program.slice(program.indexOf('function migrateSpeechProvider(){'),program.indexOf('var ttsBackend=migrateSpeechProvider();')+'var ttsBackend=migrateSpeechProvider();'.length);
+ const target={localStorage:{getItem:k=>Object.prototype.hasOwnProperty.call(local,k)?local[k]:null,setItem:(k,v)=>{local[k]=String(v);}}};
+ vm.runInNewContext('var ttsApiKey='+JSON.stringify(saved.TTS_API_KEY||'')+';'+providerFn,target);
+ return target.ttsBackend;
+}
+assert.equal(migrateTest({}), 'plugin');
+assert.equal(migrateTest({TTS_API_KEY:'old-key'}), 'direct');
+assert.equal(migrateTest({ENABLE_TTS:'false',TTS_BACKEND:'plugin'}), 'none');
+assert.equal(migrateTest({ENABLE_TTS:'true',TTS_BACKEND:'direct'}), 'direct');
+assert.equal(migrateTest({ENABLE_TTS:'false',TTS_BACKEND:'plugin',TTS_PROVIDER_MIGRATED_V2:'true'}), 'plugin');
+console.log('PASS: new-install plugin defaults and one-time speech-toggle migration');

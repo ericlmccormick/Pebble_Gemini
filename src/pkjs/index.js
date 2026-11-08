@@ -16,7 +16,19 @@ function useStoredBackend(key,hasLegacyKey){return localStorage.getItem(key)||(h
 var geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || ""; 
 var ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
 var geminiBackend=useStoredBackend('GEMINI_BACKEND',!!geminiApiKey);
-var ttsBackend=useStoredBackend('TTS_BACKEND',!!ttsApiKey);
+// Migrate old speech preference once: false means None. Fresh installs
+// default to the Google Cloud TTS plugin, including when no key exists.
+function migrateSpeechProvider(){
+  var provider=localStorage.getItem('TTS_BACKEND');
+  var previousToggle=localStorage.getItem('ENABLE_TTS');
+  var migrated=localStorage.getItem('TTS_PROVIDER_MIGRATED_V2')==='true';
+  if(!migrated && previousToggle==='false')provider='none';
+  if(provider!=='none'&&provider!=='plugin'&&provider!=='direct')provider=ttsApiKey?'direct':'plugin';
+  localStorage.setItem('TTS_BACKEND',provider);
+  localStorage.setItem('TTS_PROVIDER_MIGRATED_V2','true');
+  return provider;
+}
+var ttsBackend=migrateSpeechProvider();
 var geminiPluginConversationId=localStorage.getItem('GEMINI_PLUGIN_CONVERSATION_ID')||'';
        
 var fontSize = localStorage.getItem("FONT_SIZE") || 24;          
@@ -48,17 +60,7 @@ function normalizeTtsVoice(name) {
 ttsVoice = normalizeTtsVoice(ttsVoice);
 localStorage.setItem("TTS_VOICE", ttsVoice);        
 
-// LOGIC: Evaluate the user's TTS preference based on history
-var storedToggle = localStorage.getItem("ENABLE_TTS");
-var enableTts = false; // Default to OFF for new installs
-
-if (storedToggle === "true") {
-  enableTts = true;    // User explicitly turned it on
-} else if (storedToggle === "false") {
-  enableTts = false;   // User explicitly turned it off
-} else if (ttsApiKey !== "") {
-  enableTts = true;    // UPGRADE PATH: Turn on automatically if they already have a key saved
-}
+// The TTS_BACKEND setting alone determines whether speech is enabled.
 
 // =========================================================================
 // SECTION 3: SYSTEM SCOPE DECLARATIONS
@@ -243,15 +245,11 @@ var apiKeysItems = [
 ];
 if(hasSpeaker){
   apiKeysItems.push({
-    type:'toggle',messageKey:'ENABLE_TTS',label:'Enable spoken responses',
-    defaultValue:enableTts,
-    description:'This turns watch speech on or off, regardless of which speech provider you use.'
-  });
-  apiKeysItems.push({
     type:'select',messageKey:'TTS_BACKEND',label:'Speech provider',
     defaultValue:ttsBackend,
-    description:'Plugin: choose the voice and API key in Google Cloud TTS plugin settings. Direct: use the legacy fields below.',
+    description:'None disables speech. Plugin uses its own key and voice; direct mode uses the legacy settings below.',
     options:[
+      {label:'None — text only',value:'none'},
       {label:'Google Cloud TTS plugin (recommended)',value:'plugin'},
       {label:'Direct Google Cloud TTS (legacy)',value:'direct'}
     ]
@@ -345,7 +343,7 @@ var clayConfig = [
 // layout changes cleanly without relying on unstable capability tags.
 function customClay() {
   // Clay serializes this function into a separate phone webview. It must NEVER
-  // reference PebbleKit JS globals such as geminiBackend or enableTts.
+  // reference PebbleKit JS globals such as geminiBackend or ttsBackend.
   var page = this;
 
   function fieldValue(key, fallback) {
@@ -368,19 +366,16 @@ function customClay() {
   function updateVisibility() {
     var geminiLegacy = String(fieldValue('GEMINI_BACKEND', 'plugin')) === 'direct';
     var ttsLegacy = String(fieldValue('TTS_BACKEND', 'plugin')) === 'direct';
-    var speechValue = fieldValue('ENABLE_TTS', false);
-    var speechEnabled = speechValue === true || speechValue === 1 ||
-                        speechValue === 'true' || speechValue === '1';
 
     // Plugin-owned keys, model and voice must be configured in their plugins.
     fieldVisible('GEMINI_API_KEY', geminiLegacy);
     fieldVisible('GEMINI_MODEL', geminiLegacy);
-    fieldVisible('TTS_API_KEY', ttsLegacy && speechEnabled);
-    fieldVisible('TTS_VOICE', ttsLegacy && speechEnabled);
+    fieldVisible('TTS_API_KEY', ttsLegacy);
+    fieldVisible('TTS_VOICE', ttsLegacy);
   }
 
   page.on(page.EVENTS.AFTER_BUILD, function() {
-    ['GEMINI_BACKEND', 'TTS_BACKEND', 'ENABLE_TTS'].forEach(function(key) {
+    ['GEMINI_BACKEND', 'TTS_BACKEND'].forEach(function(key) {
       var field = page.getItemByMessageKey(key);
       if (field) field.on('change', updateVisibility);
     });
@@ -465,7 +460,6 @@ Pebble.addEventListener('showConfiguration', function() {
   clay.setSettings({
     GEMINI_BACKEND: geminiBackend,
     TTS_BACKEND: ttsBackend,
-    ENABLE_TTS: enableTts,
     GEMINI_MODEL: geminiModel,
     TTS_VOICE: ttsVoice
   });
@@ -495,7 +489,8 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem('GEMINI_BACKEND',geminiBackend);
   }
   if(settings.TTS_BACKEND){
-    ttsBackend=settings.TTS_BACKEND.value==='direct'?'direct':'plugin';
+    var selectedSpeechProvider=settings.TTS_BACKEND.value;
+    ttsBackend=selectedSpeechProvider==='none'||selectedSpeechProvider==='direct'?selectedSpeechProvider:'plugin';
     localStorage.setItem('TTS_BACKEND',ttsBackend);
   }
   if (settings.CUSTOM_PERSONA) {
@@ -506,11 +501,6 @@ Pebble.addEventListener('webviewclosed', function(e) {
   if (geminiBackend==='direct' && settings.GEMINI_API_KEY && settings.GEMINI_API_KEY.value !== "") {
     geminiApiKey = settings.GEMINI_API_KEY.value;
     localStorage.setItem("GEMINI_API_KEY", geminiApiKey); 
-  }
-
-  if (settings.ENABLE_TTS !== undefined) {
-    enableTts = settings.ENABLE_TTS.value;
-    localStorage.setItem("ENABLE_TTS", enableTts ? "true" : "false"); 
   }
 
   // An intentionally blank Clay field must not erase a previously saved key.
@@ -559,8 +549,6 @@ Pebble.addEventListener('appmessage', function(e) {
   if (dict.COMMAND === 'DICTATION') {
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
     if (ttsApiKey === null) ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
-    var savedToggle = localStorage.getItem("ENABLE_TTS");
-    if (savedToggle === "true" || savedToggle === "false") enableTts = savedToggle === "true";
 
     // The plugins own credentials; direct requests retain their old keys.
     if (geminiBackend==='direct' && !geminiApiKey) {
@@ -568,13 +556,13 @@ Pebble.addEventListener('appmessage', function(e) {
       return;
     }
 
-    if (hasSpeaker && enableTts && ttsBackend==='direct' && !ttsApiKey) {
-      sendErrorToWatch("TTS enabled but missing TTS Key.");
+    if (hasSpeaker && ttsBackend==='direct' && !ttsApiKey) {
+      sendErrorToWatch("Direct TTS selected but missing TTS Key.");
       return;
     }
 
     var skipAudio = false; 
-    if (!hasSpeaker || !enableTts || (ttsBackend==='direct' && !ttsApiKey)) {
+    if (!hasSpeaker || ttsBackend==='none' || (ttsBackend==='direct' && !ttsApiKey)) {
       skipAudio = true;    
     } else if (dict.VOLUME !== undefined && dict.VOLUME === 0) {
       skipAudio = true;    

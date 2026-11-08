@@ -25,3 +25,6 @@ This feature branch contains the **watch application only**. The plugins have mo
 The Clay settings callback is serialized into its own browser context. Earlier app code accidentally referenced outer PebbleKit JS variables (`geminiBackend`, `ttsBackend`, `enableTts`) from that callback and failed before hiding any fields. The callback is now fully self-contained and driven only by actual Clay selector values. On opening settings, the app also synchronizes provider selections from its saved state into Clay's cached settings so stale legacy settings cannot override selected plugins.
 
 The regression test now executes the callback in a separate JavaScript VM, checks plugin/legacy changes live, checks speaker toggling, and verifies direct API credentials aren't overwritten while hidden. Plugin UUIDs and the established audio protocol are unchanged.
+
+## v1.6.3 — Speech-provider simplification
+Speech provider is now **None**, **Google Cloud TTS plugin**, or **Direct TTS (legacy)**. The ENABLE_TTS toggle has been removed. None is a fully text-only mode. New installs default to Gemini Conversation and Google Cloud TTS plugins. Existing direct API keys/providers remain untouched; users with an explicitly disabled old speech toggle are migrated once to None. Direct TTS key/voice fields appear only for Direct mode.
