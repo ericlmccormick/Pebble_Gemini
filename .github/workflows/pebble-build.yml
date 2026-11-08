@@ -73,10 +73,15 @@ jobs:
             git switch --orphan builds/plugin-previews
             git rm -rf . >/dev/null 2>&1 || true
           fi
-          cp /tmp/pebble-plugin-previews/Gemini_with_Voice_plugin_preview.pbw ./
+          # Keep this branch download-only; compiler products and node_modules
+          # can otherwise be swept up by an indiscriminate git add -A.
+          git rm -rf --ignore-unmatch build node_modules .lock-waf_linux_build package-lock.json >/dev/null 2>&1 || true
           git rm -f --ignore-unmatch Gemini_Conversation_preview.pbw Google_Cloud_TTS_preview.pbw
+          git clean -fdx >/dev/null
+          cp /tmp/pebble-plugin-previews/Gemini_with_Voice_plugin_preview.pbw ./
           printf 'Gemini with Voice watch app preview. Plugins are maintained in ericlmccormick/Pebble-Gemini-plugin and ericlmccormick/Pebble-Google-TTS-plugin.\n' > README.txt
-          git add -A
+          git add -u
+          git add Gemini_with_Voice_plugin_preview.pbw README.txt
           if ! git diff --cached --quiet; then
             git commit -m "build: plugin previews from ${GITHUB_SHA}"
             git push origin HEAD:builds/plugin-previews
