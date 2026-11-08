@@ -99,6 +99,18 @@
           ]
         },
         {
+          "name": "list_models",
+          "description": "List text generation models offered to the configured Gemini API key. Excludes live-audio, TTS, images and embeddings.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "callerPermissions": [
+            "GeminiRead"
+          ]
+        },
+        {
           "name": "clear_conversation",
           "description": "Forget a conversation_id on this phone, or all conversations if all=true.",
           "parameters": {
