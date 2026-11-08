@@ -19,7 +19,9 @@ jobs:
           node --check tests/pkjs_protocol_test.js
           node --check src/pkjs/google_tts_stream.js
           node --check tests/google_tts_adapter.test.cjs
+          node --check tests/plugin_settings_ui.test.cjs
       - name: Test audio protocol and release hardening
         run: |
           node tests/pkjs_protocol_test.js
           node tests/google_tts_adapter.test.cjs
+          node tests/plugin_settings_ui.test.cjs
