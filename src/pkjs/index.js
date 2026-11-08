@@ -167,16 +167,27 @@ try {
 // (gabbro) has a microphone but no speaker: use dictation + text only.
 // Unknown hardware defaults to text-only until its capabilities are known.
 function platformHasSpeaker(platform) {
-  return platform === 'flint' || platform === 'emery';
+  // Support SDK platform aliases without inferring speaker presence on
+  // earlier Time/Time Round hardware.
+  var label=String(platform||'').toLowerCase().replace(/[_ -]/g,'');
+  return label === 'flint' || label === 'emery' ||
+    label === 'pebble2duo' || label === 'pebbletime2';
 }
 var watchInfo = null;
 var hasSpeaker = false;
-try {
-  watchInfo = Pebble.getActiveWatchInfo();
-  hasSpeaker = !!(watchInfo && platformHasSpeaker(watchInfo.platform));
-} catch (err) {
-  hasSpeaker = false;
+function detectSpeakerFromInfo() {
+  try {
+    watchInfo = Pebble.getActiveWatchInfo();
+    var platform = watchInfo && (watchInfo.platform || watchInfo.hardwarePlatform || watchInfo.model);
+    if (watchInfo && platformHasSpeaker(platform)) hasSpeaker=true;
+    if (watchInfo && watchInfo.capabilities &&
+        (watchInfo.capabilities.speaker===true || watchInfo.capabilities.audioOutput===true))
+      hasSpeaker=true;
+  } catch(err) {
+    console.log('Watch speaker metadata unavailable; awaiting hardware volume indication');
+  }
 }
+detectSpeakerFromInfo();
 
 // =========================================================================
 // SECTION 5: STREAMING ARCHITECTURE QUEUE STATE
@@ -686,6 +697,13 @@ Pebble.addEventListener('appmessage', function(e) {
   }
 
   if (dict.COMMAND === 'DICTATION') {
+    // The C app sends VOLUME only for builds with PBL_SPEAKER.
+    // This is authoritative even if getActiveWatchInfo reports an alias or
+    // is unavailable when the phone-side JS first initializes.
+    if (typeof dict.VOLUME === 'number' && dict.VOLUME > 0 && !hasSpeaker) {
+      hasSpeaker = true;
+      console.log('Speaker confirmed by watch hardware');
+    }
     refreshAgentInfo();
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
     if (ttsApiKey === null) ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
@@ -703,7 +721,8 @@ Pebble.addEventListener('appmessage', function(e) {
 
     var skipAudio = false; 
     if (!hasSpeaker || ttsBackend==='none' || (ttsBackend==='direct' && !ttsApiKey)) {
-      skipAudio = true;    
+      console.log('TTS skipped:',!hasSpeaker?'speaker not detected':ttsBackend==='none'?'speech provider disabled':'missing direct TTS credentials');
+      skipAudio = true;
     } else if (dict.VOLUME !== undefined && dict.VOLUME === 0) {
       skipAudio = true;    
     }
@@ -905,9 +924,10 @@ function startTTSFetchLoop(generation, streamId) {
       maybeFinishAudioStream(generation,streamId);
     }).catch(function(error){
       if(generation!==requestGeneration)return;
-      console.log('Google TTS plugin audio failed:',String(error&&error.message||error));
+      var detail=String(error&&error.message||error);
+      console.log('Google TTS plugin audio failed:',detail);
       cancelCurrentAudio();
-      Pebble.sendAppMessage({COMMAND:'AUDIO_ERROR',STREAM_ID:streamId});
+      Pebble.sendAppMessage({COMMAND:'AUDIO_ERROR',STREAM_ID:streamId,TEXT:detail.substring(0,95)});
     });
     return;
   }
@@ -955,7 +975,8 @@ function startTTSFetchLoop(generation, streamId) {
     console.log('TTS failed:', apiErrorMessage(error, 'TTS'));
     // Stop speech, but leave the successfully displayed answer intact.
     cancelCurrentAudio();
-    Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:streamId });
+    Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:streamId,
+      TEXT:apiErrorMessage(error,'TTS').substring(0,95) });
   });
 }
 
