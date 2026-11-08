@@ -19,3 +19,6 @@ The `sdk/` directory contains MIT-licensed copies of the Home Assistant Bridge a
 Do not mix this SDK's `AUDIO_RESET/AUDIO_CHUNK` packet protocol with the older Gemini watch's acknowledged `AUDIO_ACK/SEQ` protocol without an adapter.
 
 Build from this directory with plugin-capable Pebble tooling. Test the bridge with `tts_prepare({test_tone:true})` even before configuring an API key. Google Cloud API usage is separately billed.
+
+## Settings layout (v0.2.0)
+The phone settings page now has responsive light/dark styles, accessible labeled inputs, grouped voice options and a per-million-character cost explanation. Existing WaveNet, Neural2, and Chirp 3 HD output and HA SDK audio protocol are unchanged.

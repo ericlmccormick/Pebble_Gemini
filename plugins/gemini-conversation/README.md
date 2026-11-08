@@ -12,3 +12,6 @@ Plugin UUID: `2c5edc42-b096-4f76-b284-1f27907e6501`. Required consuming-app `peb
 - `clear_conversation({conversation_id})` or `clear_conversation({all:true})`.
 No TTS or audio, intentionally. Another app can combine this with the standalone Google TTS plugin.
 Security: credentials in secureStorage, never returned; network requests to the official Gemini API, with key in the request header. API quotas and costs are the user's responsibility. Plugin API is currently preview and subject to change.
+
+## Model selection and pricing (v0.2.0)
+The new mobile settings page provides a Google-key-based model refresh, text-generation-only model dropdown, and indicative input/output token pricing with relative cost tiers. The optional `list_models` read action exposes `{models,checkedAt,hasMore}` with the `GeminiRead` permission. Unlisted or newly added models show "price not listed" rather than guessed rates. Source: https://ai.google.dev/gemini-api/docs/pricing/.

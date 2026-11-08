@@ -18,3 +18,10 @@ Pushes automatically run the plugin unit tests and package each independent .pbw
 
 ## Plan for splitting repositories
 Copy `plugins/gemini-conversation/` and `plugins/google-tts/` each to the root of a separate repository, preserving UUIDs, action names and the 6000-byte chunk format. Keep copies of the audio SDK pinned to a commit. Then update the app's dependency documentation, not its plugin IDs.
+
+## Provider-aware settings (v1.6.1)
+Gemini Conversation v0.2.0 includes a model dropdown, account-specific model refresh, and per-million-token pricing guidance. Google Cloud TTS v0.2.0 has a readable light/dark settings UI, grouped WaveNet/Neural2/Chirp voices, and price guidance. The plugin settings own API credentials and model or voice selection.
+
+When Gemini Conversation plugin is selected, the app hides direct Gemini API key and model fields. When Google Cloud TTS plugin is selected, the app hides direct TTS key and voice fields. If speech is disabled, it hides direct TTS inputs regardless of source. The provider selectors, voice enabled toggle, personalization, font size, and conversation reset remain visible.
+
+The app retains direct-mode values for rollback; hidden fields do not overwrite saved settings. Both plugins remain independently installable, and all three builds are versioned as previews. Model availability is pulled from Google's account-specific API list; prices are reference guidance from Google's official sheets.
