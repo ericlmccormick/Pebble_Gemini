@@ -1,5 +1,5 @@
 /* Pebble Google Cloud TTS audio transport SDK, v1.
- * Copy to src/pkjs/ha_audio.js and require('./ha_audio').
+ * Copy to src/pkjs/google_tts_audio.js and require('./google_tts_audio').
  * Requires the Google TTS plugin, PBL_SPEAKER, and message keys COMMAND/TEXT/CHUNK.
  * No Google Cloud credentials or direct API requests in this module.
  * Copyright (c) 2026 contributors. MIT licensed.
