@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   native-build:
     runs-on: ubuntu-24.04
@@ -50,3 +53,36 @@ jobs:
           name: gemini-watchapp-plugin-enabled-pbw
           path: build/*.pbw
           if-no-files-found: error
+      - name: Prepare direct-install preview PBWs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/gemini-plugin-integration'
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --output /tmp/pack-plugin-pbw.py \
+            https://raw.githubusercontent.com/coredevices/pebble-apps/11809f856b00b3ac5e91b6cf58c251db6aed4b56/scripts/pack-plugin-pbw.py
+          python3 /tmp/pack-plugin-pbw.py plugins/gemini-conversation
+          python3 /tmp/pack-plugin-pbw.py plugins/google-tts
+          mkdir -p /tmp/pebble-plugin-previews
+          cp plugins/gemini-conversation/build/*.pbw /tmp/pebble-plugin-previews/Gemini_Conversation_preview.pbw
+          cp plugins/google-tts/build/*.pbw /tmp/pebble-plugin-previews/Google_Cloud_TTS_preview.pbw
+          cp build/*.pbw /tmp/pebble-plugin-previews/Gemini_with_Voice_plugin_preview.pbw
+          for f in /tmp/pebble-plugin-previews/*.pbw; do unzip -t "$f" >/dev/null; done
+      - name: Publish preview files without ZIPs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/gemini-plugin-integration'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin builds/plugin-previews >/dev/null; then
+            git fetch origin builds/plugin-previews
+            git switch -C builds/plugin-previews origin/builds/plugin-previews
+          else
+            git switch --orphan builds/plugin-previews
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp /tmp/pebble-plugin-previews/*.pbw ./
+          printf 'Development preview builds. Not App Store releases. Generated from the feature/gemini-plugin-integration branch.\n' > README.txt
+          git add Gemini_Conversation_preview.pbw Google_Cloud_TTS_preview.pbw Gemini_with_Voice_plugin_preview.pbw README.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "build: plugin previews from ${GITHUB_SHA}"
+            git push origin HEAD:builds/plugin-previews
+          fi
