@@ -767,7 +767,8 @@ Pebble.addEventListener('appmessage', function(e) {
 });
 
 function sendErrorToWatch(msg) {
-  Pebble.sendAppMessage({ 'COMMAND': 'TEXT_RESPONSE_NO_AUDIO', 'TEXT': msg }); 
+  // Show diagnostic failures without starting a recursive TTS error loop.
+  Pebble.sendAppMessage({ 'COMMAND': 'TEXT_RESPONSE_NO_AUDIO', 'TEXT': msg });
 }
 
 // =========================================================================
@@ -809,11 +810,10 @@ function fetchGeminiResponse(prompt, skipAudio) {
         if(shown==='anthropic')shown='Claude';
         rememberAgentInfo(shown.charAt(0).toUpperCase()+shown.slice(1),type);
       }
-      if(result.kind==='receipt'){
-        console.log('AI agent returned send-only receipt (speech intentionally not requested)');
-        return {delivery_receipt:result.text};
-      }
-      console.log('AI assistant reply accepted; TTS provider=',ttsBackend,'speaker=',hasSpeaker);
+      // Every displayed agent response is eligible for TTS, including
+      // handoff receipts. The watch display, not plugin metadata, is the
+      // source of truth for speech. Never silently drop text-to-speech here.
+      console.log('AI plugin text received, kind=',result.kind,'TTS provider=',ttsBackend,'speaker=',hasSpeaker);
       return {candidates:[{content:{parts:[{text:result.text}]}}]};
     });
   }else responseRequest=requestJsonWithTimeout(url, {
@@ -826,8 +826,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
   }, GEMINI_TIMEOUT_MS);
   responseRequest.then(function(data) {
     if (generation !== requestGeneration) return;
-    if(data.delivery_receipt){sendErrorToWatch(data.delivery_receipt);return;}
-    if (data.candidates && data.candidates.length > 0) {
+     if (data.candidates && data.candidates.length > 0) {
       var parts = data.candidates[0].content && data.candidates[0].content.parts || [];
       var replyText = parts.map(function(part) { return part.text || ''; }).join(' ').trim();
       if (!replyText) {
@@ -858,7 +857,9 @@ function fetchGeminiResponse(prompt, skipAudio) {
       function startAnswer() {
         if (generation !== requestGeneration || skipAudio) return;
         console.log('Starting TTS',ttsBackend,'for response stream',streamId);
-        var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText];
+        // Speak the SAME text we displayed, rather than relying on separate
+        // agent metadata or an unbounded full response.
+        var rawSentences = displayText.match(/[^.!?]+[.!?]*/g) || [displayText];
         sentenceQueue = rawSentences.map(function(part) { return part.trim(); }).filter(function(part) { return part.length > 0; });
         startTTSFetchLoop(generation, streamId);
       }
