@@ -630,6 +630,14 @@ Pebble.addEventListener('webviewclosed', function(e) {
 // Agent icon protocol: 0 WISP, 1 Gemini, 2 ChatGPT/OpenAI,
 // 3 Claude/Anthropic, 4 Grok/xAI, 5 Muse, 6 OpenRouter, 7 DeepSeek.
 var agentInfoGeneration=0;
+var lastAgentInfo=null;
+try {lastAgentInfo=JSON.parse(localStorage.getItem('WISP_LAST_AGENT_INFO')||'null');}
+catch(e){lastAgentInfo=null;}
+function rememberAgentInfo(name,icon){
+  lastAgentInfo={name:String(name||'WISP').slice(0,28),icon:icon|0};
+  localStorage.setItem('WISP_LAST_AGENT_INFO',JSON.stringify(lastAgentInfo));
+  sendAgentInfoReliable(lastAgentInfo.name,lastAgentInfo.icon);
+}
 function providerIcon(provider){
   var ids={gemini:1,openai:2,anthropic:3,claude:3,xai:4,grok:4,
     muse:5,openrouter:6,deepseek:7};
@@ -655,6 +663,9 @@ function refreshAgentInfo(){
   var chosen=AgentPlugins.selected(Pebble,geminiBackend);
   if(!chosen){
     sendAgentInfoReliable('WISP',0);return;
+  }
+  if(chosen.uuid===GEMINI_PLUGIN_UUID&&lastAgentInfo&&lastAgentInfo.icon>0){
+    sendAgentInfoReliable(lastAgentInfo.name,lastAgentInfo.icon);
   }
   if(chosen.uuid!==GEMINI_PLUGIN_UUID){
     var aliases={};
@@ -684,7 +695,7 @@ function refreshAgentInfo(){
       if(label==='OpenAI')label='ChatGPT';
       if(label==='Anthropic')label='Claude';
       if(label==='xAI')label='Grok';
-      sendAgentInfoReliable(label,icon);
+      rememberAgentInfo(label,icon);
     }).catch(function(err){
       console.log('WISP provider info unavailable',err&&err.code||err&&err.message||err);
     });
@@ -796,9 +807,13 @@ function fetchGeminiResponse(prompt, skipAudio) {
         var shown=String(result.provider);
         if(shown==='openai')shown='ChatGPT';
         if(shown==='anthropic')shown='Claude';
-        sendAgentInfoReliable(shown.charAt(0).toUpperCase()+shown.slice(1),type);
+        rememberAgentInfo(shown.charAt(0).toUpperCase()+shown.slice(1),type);
       }
-      if(result.kind==='receipt')return {delivery_receipt:result.text};
+      if(result.kind==='receipt'){
+        console.log('AI agent returned send-only receipt (speech intentionally not requested)');
+        return {delivery_receipt:result.text};
+      }
+      console.log('AI assistant reply accepted; TTS provider=',ttsBackend,'speaker=',hasSpeaker);
       return {candidates:[{content:{parts:[{text:result.text}]}}]};
     });
   }else responseRequest=requestJsonWithTimeout(url, {
@@ -842,6 +857,7 @@ function fetchGeminiResponse(prompt, skipAudio) {
       var textPayload = { 'COMMAND': cmd, 'TEXT': displayText, 'STREAM_ID': streamId };
       function startAnswer() {
         if (generation !== requestGeneration || skipAudio) return;
+        console.log('Starting TTS',ttsBackend,'for response stream',streamId);
         var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText];
         sentenceQueue = rawSentences.map(function(part) { return part.trim(); }).filter(function(part) { return part.length > 0; });
         startTTSFetchLoop(generation, streamId);
