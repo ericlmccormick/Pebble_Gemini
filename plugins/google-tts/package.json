@@ -1,0 +1,112 @@
+{
+  "name": "pebble-google-tts-plugin",
+  "version": "0.1.0",
+  "author": "Eric McCormick",
+  "pebble": {
+    "displayName": "Google Cloud TTS",
+    "uuid": "2c5edc42-b096-4f76-b284-1f27907e6502",
+    "sdkVersion": "3",
+    "manifestVersion": 2,
+    "projectType": "plugin",
+    "configPage": "src/config.html",
+    "usesPermissions": [
+      "Internet"
+    ],
+    "plugin": {
+      "description": "Google Cloud Text-to-Speech audio bridge. Reusable HA-compatible verified WAV sessions, 8kHz PCM, voice selection.",
+      "script": "src/plugin/index.js",
+      "definesPermissions": [
+        {
+          "name": "GoogleTtsSpeak",
+          "label": "Send text to Google Cloud TTS and fetch generated speech",
+          "kind": "exfiltrating"
+        },
+        {
+          "name": "GoogleTtsRead",
+          "label": "Read Google TTS configuration status",
+          "kind": "read"
+        }
+      ],
+      "actions": [
+        {
+          "name": "tts_prepare",
+          "description": "Generate canonical 8kHz PCM16 WAV session for text; returns verified first chunk and metadata.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "voice": {
+                "type": "string"
+              },
+              "test_tone": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "callerPermissions": [
+            "GoogleTtsSpeak"
+          ]
+        },
+        {
+          "name": "tts_chunk",
+          "description": "Fetch base64 WAV chunk by session_id and aligned offset; includes checksum.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "session_id",
+              "offset"
+            ],
+            "additionalProperties": false
+          },
+          "callerPermissions": [
+            "GoogleTtsSpeak"
+          ]
+        },
+        {
+          "name": "tts_release",
+          "description": "Delete temporary audio session and its chunks.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "session_id"
+            ],
+            "additionalProperties": false
+          },
+          "callerPermissions": [
+            "GoogleTtsSpeak"
+          ]
+        },
+        {
+          "name": "get_config",
+          "description": "Read configured status and default voice, never the API key.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "callerPermissions": [
+            "GoogleTtsRead"
+          ]
+        }
+      ]
+    }
+  }
+}

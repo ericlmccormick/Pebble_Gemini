@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Google Cloud TTS</title><style>body{font:16px system-ui,sans-serif;max-width:600px;margin:20px}input,select,button{font:inherit;padding:10px;margin:8px 0}input,select{width:100%;box-sizing:border-box}button{border:0;border-radius:7px;background:#1685b8;color:white}button.alt{background:#555}#status{white-space:pre-wrap;background:#eee;color:#222;padding:12px;border-radius:6px}</style></head><body>
+<h2>Google Cloud TTS</h2><p>Speech synthesis for other Pebble apps. The plugin provides verified audio; each watch app handles Bluetooth playback using the included audio SDK.</p>
+<label>Google Cloud Text-to-Speech API key <input id="key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
+<label>Default voice<select id="voice">
+<option value="en-US-Wavenet-F">WaveNet F ($)</option><option value="en-US-Wavenet-C">WaveNet C ($)</option><option value="en-US-Wavenet-D">WaveNet D ($)</option>
+<option value="en-US-Neural2-F">Neural2 F ($$)</option><option value="en-US-Neural2-C">Neural2 C ($$)</option><option value="en-US-Neural2-D">Neural2 D ($$)</option>
+<option value="en-US-Chirp3-HD-Kore">Chirp 3 HD Kore ($$$)</option><option value="en-US-Chirp3-HD-Aoede">Chirp 3 HD Aoede ($$$)</option><option value="en-US-Chirp3-HD-Leda">Chirp 3 HD Leda ($$$)</option><option value="en-US-Chirp3-HD-Zephyr">Chirp 3 HD Zephyr ($$$)</option><option value="en-US-Chirp3-HD-Charon">Chirp 3 HD Charon ($$$)</option><option value="en-US-Chirp3-HD-Puck">Chirp 3 HD Puck ($$$)</option>
+</select></label><button id="save">Save</button> <button id="forget" class="alt">Forget key and speech sessions</button><p>API usage may incur charges. Credentials are kept in Pebble secure storage. The plugin does not use Gemini conversations and is compatible with any text source.</p><div id="status">Loading…</div>
+<script>(function(){function $(x){return document.getElementById(x);}function send(m){return Pebble.sendMessage('plugin',m);}function status(s){$('status').textContent=s;}
+send({type:'status'}).then(function(r){$('voice').value=r.voice||'en-US-Wavenet-F';status(r.configured?'API key saved.':'Not configured.');}).catch(function(e){status(e.message);});
+$('save').onclick=async function(){try{var r=await send({type:'save',api_key:$('key').value,voice:$('voice').value});$('key').value='';status(r.ok?'Saved.':r.error);}catch(e){status(e.message);}};
+$('forget').onclick=async function(){if(!confirm('Forget Google Cloud TTS key and speech sessions?'))return;var r=await send({type:'forget'});status(r.ok?'Key and sessions cleared.':r.error);};})();</script></body></html>
