@@ -115,6 +115,6 @@ assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6502'&
 assert.equal(manifest.name,'wisp');
 assert.equal(manifest.pebble.displayName,'WISP');
 assert.equal(manifest.pebble.uuid,'426c68c7-bdd7-445a-860a-ea587a188993');
-assert.match(fs.readFileSync(path.join(root,'src/c/main.c'),'utf8'),/text_layer_set_text\(s_title_layer, "WISP"\)/);
+assert.match(fs.readFileSync(path.join(root,'src/c/main.c'),'utf8'),/text_layer_set_text\(s_title_layer,s_agent_title\)/);
 assert.match(app,/Wrist Intelligence & Speech Portal/);
 console.log('PASS: WISP branding, preserved identity, isolated Clay settings and plugin permissions');
