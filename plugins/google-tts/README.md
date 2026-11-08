@@ -19,3 +19,8 @@ The `sdk/` directory contains MIT-licensed copies of the Home Assistant Bridge a
 Do not mix this SDK's `AUDIO_RESET/AUDIO_CHUNK` packet protocol with the older Gemini watch's acknowledged `AUDIO_ACK/SEQ` protocol without an adapter.
 
 Build from this directory with plugin-capable Pebble tooling. Test the bridge with `tts_prepare({test_tone:true})` even before configuring an API key. Google Cloud API usage is separately billed.
+
+## Settings layout and voice rates (v0.2.0)
+The settings page follows the Home Assistant Bridge visual pattern with readable mobile layouts, light/dark colors, large inputs and separate connection, voice and privacy panels. The default voice dropdown groups the 12 established US-English WaveNet, Neural2 and Chirp 3 HD voices.
+
+The displayed paid rates are WaveNet $4, Neural2 $16 and Chirp 3 HD $30 per 1 million synthesized characters, after free allowances. Actual costs and allowances depend on Google Cloud billing and can change; consult [Google Cloud Text-to-Speech pricing](https://cloud.google.com/text-to-speech/pricing).
