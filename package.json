@@ -247,7 +247,7 @@
     "watchapp": {
       "watchface": false
     },
-    "version": "2.1.1",
+    "version": "2.1.2",
     "manifestVersion": 2,
     "usesPermissions": [
       {
@@ -299,5 +299,5 @@
       }
     ]
   },
-  "version": "2.1.1"
+  "version": "2.1.2"
 }
