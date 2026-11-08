@@ -44,3 +44,9 @@ jobs:
                   assert any(platform in n for n in names), f'Missing {platform} binary in {pbws[0]}: {names}'
           print('Built and packaged all six targets:', ', '.join(sorted(expected)))
           PY
+      - name: Upload Pebble Gemini plugin-enabled PBW
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemini-watchapp-plugin-enabled-pbw
+          path: build/*.pbw
+          if-no-files-found: error
