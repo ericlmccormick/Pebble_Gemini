@@ -4,6 +4,7 @@ const root=path.join(__dirname,'..');
 const storage={GEMINI_BACKEND:'plugin',TTS_BACKEND:'plugin',GEMINI_API_KEY:'existing-gemini-direct',TTS_API_KEY:'existing-tts-direct'};
 const listeners={},items=new Map(),events={};
 function Clay(config,customizer){
+  this.config=config;
   this.EVENTS={AFTER_BUILD:'afterBuild'};
   this.generateUrl=()=>'/settings';
   this.setSettings=changes=>{
