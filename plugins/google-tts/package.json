@@ -10,7 +10,14 @@
     "projectType": "plugin",
     "configPage": "src/config.html",
     "usesPermissions": [
-      "Internet"
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": [
+            "texttospeech.googleapis.com"
+          ]
+        }
+      }
     ],
     "plugin": {
       "description": "Google Cloud Text-to-Speech audio bridge. Reusable HA-compatible verified WAV sessions, 8kHz PCM, voice selection.",
