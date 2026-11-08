@@ -212,7 +212,7 @@ var apiKeysItems = [
   {
     type:'select',messageKey:'GEMINI_BACKEND',label:'AI conversation provider',
     defaultValue:geminiBackend,
-    description:'AI Conversation selects the provider and model internally and returns full replies. Other installed agents may only acknowledge delivery.',
+    description:'Only installed agent plugins appear in this list. Install other agents from the Pebble Store, then reopen settings. AI Conversation returns full replies; other agents may only confirm delivery.',
     options:AgentPlugins.options(Pebble,geminiBackend)
   },
   {
@@ -303,13 +303,6 @@ var clayConfig = [
   {
     "type": "section", 
     "items": apiKeysItems
-  },
-  {
-    "type": "section",
-    "items": [
-      {type:'heading',defaultValue:'Agent discovery diagnostics'},
-      {type:'text',wispDiscoveryDiagnostic:true,defaultValue:AgentPlugins.diagnosticText(Pebble)}
-    ]
   },
   {
     "type": "section",
@@ -460,20 +453,16 @@ function lowPassFilter(samples) {
 // =========================================================================
 
 Pebble.addEventListener('showConfiguration', function() {
-  // Diagnostics distinguish a missing plugin from a filtered-out action.
-  // These contain only public manifest names/UUIDs, never saved credentials.
-  try{console.log('WISP agent discovery: '+JSON.stringify(AgentPlugins.diagnostics(Pebble)));}catch(e){}
   // Refresh the original source tree, then reconstruct Clay from scratch.
   // Merely mutating an already constructed Clay object can retain its
   // originally compiled select options in the generated configuration.
+  geminiBackend=AgentPlugins.validChoice(Pebble,geminiBackend);
+  localStorage.setItem('GEMINI_BACKEND',geminiBackend);
   clayConfig.forEach(function(section){
     (section.items||[]).forEach(function(item){
       if(item.messageKey==='GEMINI_BACKEND'){
-        item.options=AgentPlugins.options(Pebble,geminiBackend);
+        item.options=AgentPlugins.options(Pebble);
         item.defaultValue=geminiBackend;
-      }
-      if(item.type==='text'&&item.wispDiscoveryDiagnostic){
-        item.defaultValue=AgentPlugins.diagnosticText(Pebble);
       }
     });
   });
@@ -506,7 +495,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
   }
   if(settings.GEMINI_BACKEND){
     var selectedAgent=String(settings.GEMINI_BACKEND.value||'plugin');
-    geminiBackend=selectedAgent==='direct'||/^agent:[a-f0-9-]{36}$/.test(selectedAgent)?selectedAgent:AgentPlugins.agentId();
+    geminiBackend=AgentPlugins.validChoice(Pebble,selectedAgent);
     localStorage.setItem('GEMINI_BACKEND',geminiBackend);
   }
   if(settings.TTS_BACKEND){

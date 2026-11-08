@@ -8,24 +8,33 @@ const grok='80ee6780-856f-411f-954b-4553ba7f2af8';
 const muse='b8346592-cd59-4b83-9185-87d94e0734b0';
 const example=(uuid,name,actions)=>({uuid,name,actions:actions===undefined?[{name:'send_to_agent'}]:actions});
 const onlyTwo={enumeratePlugins:()=>[example(ai,'AI Conversation'),example(chatgpt,'ChatGPT')]};
-const options=Agent.options(onlyTwo,Agent.agentId());
-assert.equal(options.filter(x=>x.value.startsWith('agent:')).length,5);
-assert.ok(options.some(x=>x.value==='agent:'+claude&&x.label.includes('not detected')));
-assert.ok(options.some(x=>x.value==='agent:'+grok&&x.label.includes('not detected')));
-assert.ok(options.some(x=>x.value==='agent:'+muse&&x.label.includes('not detected')));
-assert.ok(!options.some(x=>x.value==='agent:'+chatgpt&&x.label.includes('not detected')));
-assert.equal(Agent.selected(onlyTwo,'agent:'+muse).detected,false);
-assert.equal(Agent.diagnostics(onlyTwo).reported,2);
-assert.match(Agent.diagnosticText(onlyTwo),/Grok Bot: not reported/);
+const options=Agent.options(onlyTwo);
+assert.equal(options.filter(x=>x.value.startsWith('agent:')).length,2);
+for(const id of [claude,grok,muse]){
+ assert.equal(options.some(x=>x.value==='agent:'+id),false,'uninstalled agents must stay hidden');
+ assert.equal(Agent.selected(onlyTwo,'agent:'+id),null);
+}
+assert.equal(Agent.validChoice(onlyTwo,'agent:'+claude),'agent:'+ai);
+assert.equal(Agent.validChoice(onlyTwo,'agent:'+chatgpt),'agent:'+chatgpt);
+assert.equal(Agent.validChoice(onlyTwo,'direct'),'direct');
+assert.equal(Agent.validChoice({enumeratePlugins:()=>[]},'agent:'+ai),'direct');
+assert.equal(Agent.options({enumeratePlugins:()=>[]}).some(x=>x.value.startsWith('agent:')),false);
 const extra='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const all={enumeratePlugins:()=>[...onlyTwo.enumeratePlugins(),example(extra,'Other AI',['send_to_agent']),example(claude,'Claude',[])]};
-assert.ok(Agent.options(all,Agent.agentId()).some(x=>x.value==='agent:'+extra));
-assert.ok(Agent.options(all,Agent.agentId()).some(x=>x.value==='agent:'+claude&&x.label.includes('action not reported')));
-const chosen=Agent.selected(onlyTwo,Agent.agentId());
+const expanded={enumeratePlugins:()=>[
+ ...onlyTwo.enumeratePlugins(),
+ example(claude,'Claude',['send_to_agent']),
+ example(extra,'Other AI',[{name:'send_to_agent'}]),
+ example(grok,'Grok Bot',[{name:'refresh'}])]};
+assert.equal(Agent.options(expanded).some(x=>x.value==='agent:'+claude),true);
+assert.equal(Agent.options(expanded).some(x=>x.value==='agent:'+extra),true);
+assert.equal(Agent.options(expanded).some(x=>x.value==='agent:'+grok),false,
+ 'installed plugin without the send action must not be offered');
+assert.equal(Agent.catalogue(expanded).length,4);
+const chosen=Agent.selected(onlyTwo,'agent:'+ai);
 const complete={ok:true,text:'The real answer',reply_type:'assistant',status:'completed',
-  received:true,provider:'openai',model:'gpt-5-mini',
-  validation:{provider_http_ok:true,reply_text_present:true},
-  request_id:'watch_001',message_id:'m001',chat_id:'s001'};
+ received:true,provider:'openai',model:'gpt-5-mini',
+ validation:{provider_http_ok:true,reply_text_present:true},
+ request_id:'watch_001',message_id:'m001',chat_id:'s001'};
 (async()=>{
  let call;
  const Pb={invokeAction:async opts=>{call=opts;return complete;}};
@@ -33,15 +42,13 @@ const complete={ok:true,text:'The real answer',reply_type:'assistant',status:'co
  assert.equal(call.action,'send_to_agent');
  assert.deepEqual(call.args,{message:'Please answer'});
  assert.equal(answer.kind,'answer');
- const missing=await Agent.dispatch({invokeAction:async opts=>{call=opts;return {ok:false,code:'PLUGIN_UNAVAILABLE',message:'Not installed'};}},Agent.selected(onlyTwo,'agent:'+grok),'Question').then(()=>null,e=>e);
- assert.equal(call.plugin,grok);
- assert.equal(missing.code,'PLUGIN_UNAVAILABLE');
- const receipt=await Agent.dispatch({invokeAction:async()=>({ok:true,text:'Sent to Claude'})},Agent.selected(onlyTwo,'agent:'+claude),'Hello');
+ await assert.rejects(Agent.dispatch(Pb,Agent.selected(onlyTwo,'agent:'+grok),'Question'),/not installed/);
+ const receipt=await Agent.dispatch({invokeAction:async()=>({ok:true,text:'Sent to ChatGPT'})},Agent.selected(onlyTwo,'agent:'+chatgpt),'Hello');
  assert.equal(receipt.kind,'receipt');
  const bad=await Agent.dispatch({invokeAction:async()=>({...complete,received:false})},chosen,'No');
  assert.equal(bad.kind,'receipt');
  let calls=0;
  await assert.rejects(Agent.dispatch({invokeAction:async()=>{calls++;return {ok:false,message:'Unknown delivery'};}},chosen,'Hi'),/Unknown delivery/);
  assert.equal(calls,1);
- console.log('PASS: known agent fallback, host detection diagnostics, action compatibility and guarded response handling');
+ console.log('PASS: installed-only agent discovery, safe provider fallback and guarded responses');
 })().catch(e=>{console.error(e);process.exitCode=1;});
