@@ -27,16 +27,16 @@
     "resources": {
       "media": [
         {
-          "file": "images/gemini_logo_emery.png",
-          "name": "IMAGE_GEMINI_LOGO",
+          "file": "images/WISP_color_48.png",
+          "name": "IMAGE_WISP_LOGO",
           "targetPlatforms": [
             "emery"
           ],
           "type": "bitmap"
         },
         {
-          "file": "images/gemini_logo_chalk.png",
-          "name": "IMAGE_GEMINI_LOGO",
+          "file": "images/WISP_mono_48.png",
+          "name": "IMAGE_WISP_LOGO",
           "targetPlatforms": [
             "chalk",
             "gabbro"
@@ -44,16 +44,16 @@
           "type": "bitmap"
         },
         {
-          "file": "images/gemini_logo_basalt.png",
-          "name": "IMAGE_GEMINI_LOGO",
+          "file": "images/WISP_color_48.png",
+          "name": "IMAGE_WISP_LOGO",
           "targetPlatforms": [
             "basalt"
           ],
           "type": "bitmap"
         },
         {
-          "file": "images/gemini_logo_diorite.png",
-          "name": "IMAGE_GEMINI_LOGO",
+          "file": "images/WISP_mono_48.png",
+          "name": "IMAGE_WISP_LOGO",
           "targetPlatforms": [
             "diorite",
             "flint"
@@ -61,7 +61,7 @@
           "type": "bitmap"
         },
         {
-          "file": "images/icon25.png",
+          "file": "images/WISP_menu_25.png",
           "menuIcon": true,
           "name": "logo25",
           "targetPlatforms": null,

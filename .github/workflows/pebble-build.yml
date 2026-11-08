@@ -28,6 +28,11 @@ jobs:
           uv tool install pebble-tool --python python3.12
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/pebble" sdk install latest
+      - name: Generate approved WISP color and monochrome icons
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python tools/generate_wisp_icons.py
+          python tests/wisp_icon_test.py
       - name: Build all target platforms
         run: |
           pebble build
@@ -60,6 +65,8 @@ jobs:
           mkdir -p /tmp/pebble-plugin-previews
           cp build/*.pbw /tmp/pebble-plugin-previews/WISP_preview.pbw
           unzip -t /tmp/pebble-plugin-previews/WISP_preview.pbw >/dev/null
+          cp branding/WISP_color_144.png branding/WISP_color_80.png branding/WISP_mono_144.png branding/WISP_mono_80.png /tmp/pebble-plugin-previews/
+          cp resources/images/WISP_menu_25.png /tmp/pebble-plugin-previews/
       - name: Publish preview files without ZIPs
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/gemini-plugin-integration'
         run: |
@@ -83,9 +90,14 @@ jobs:
           git rm -f --ignore-unmatch Gemini_Conversation_preview.pbw Google_Cloud_TTS_preview.pbw Gemini_with_Voice_plugin_preview.pbw
           git clean -fdx >/dev/null
           cp /tmp/pebble-plugin-previews/WISP_preview.pbw ./
+          cp /tmp/pebble-plugin-previews/WISP_color_144.png ./
+          cp /tmp/pebble-plugin-previews/WISP_color_80.png ./
+          cp /tmp/pebble-plugin-previews/WISP_mono_144.png ./
+          cp /tmp/pebble-plugin-previews/WISP_mono_80.png ./
+          cp /tmp/pebble-plugin-previews/WISP_menu_25.png ./
           printf 'WISP (Wrist Intelligence & Speech Portal) watch app preview. Plugins are maintained in ericlmccormick/Pebble-Gemini-plugin and ericlmccormick/Pebble-Google-TTS-plugin.\n' > README.txt
           git add -u
-          git add WISP_preview.pbw README.txt
+          git add WISP_preview.pbw README.txt WISP_color_144.png WISP_color_80.png WISP_mono_144.png WISP_mono_80.png WISP_menu_25.png
           if ! git diff --cached --quiet; then
             git commit -m "build: plugin previews from ${GITHUB_SHA}"
             git push origin HEAD:builds/plugin-previews

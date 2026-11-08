@@ -23,3 +23,7 @@ For technical details, see [PLUGIN_INTEGRATION.md](PLUGIN_INTEGRATION.md).
 **Short description:** Talk to your Pebble. Get AI responses from your preferred agent, with optional spoken answers.
 
 **Description:** WISP (Wrist Intelligence & Speech Portal), formerly Gemini with Voice, connects your Pebble to AI conversations. Choose an installed Pebble agent plugin; the AI Conversation plugin lets you configure Gemini, ChatGPT via the OpenAI API, Claude, Grok and more in one place. WISP handles watch dictation, readable replies and optional voice playback through the separate Google Cloud TTS plugin. Full spoken answers require an agent that returns a complete reply and a watch with a speaker.
+
+## WISP logo
+
+The selected WISP logo is a speech bubble with a five-bar waveform and blue signal arcs on black—no watch illustration. It is optimized for 144×144 and 80×80 color displays, with high-contrast black-and-white variants for monochrome Pebble devices. The source is `branding/WISP_source_144.png`. Run `python tools/generate_wisp_icons.py` (requires Pillow) to regenerate all icons. CI verifies the three-color palette, monochrome bitmaps and 25×25 transparent menu icon before compiling. The workflow publishes the four 144/80 icons directly beside the PBW for phone downloads.

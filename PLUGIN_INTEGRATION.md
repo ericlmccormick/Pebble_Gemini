@@ -41,3 +41,6 @@ All installed agent choices use the standard `send_to_agent({message})` action, 
 - Preserved watch app UUID `426c68c7-bdd7-445a-860a-ea587a188993`, persisted settings keys, existing agent selection, and independent speech plugin.
 - Package name is now `wisp`; no new app or separate install is necessary.
 - This naming update does not change the on-watch logo resource images; those remain the existing artwork until a separate replacement design is selected.
+
+## WISP logo assets
+Selected third icon: white speech bubble containing a waveform with blue broadcast arcs; black background. Current native app uses 48×48 color art on color devices, high-contrast 48×48 monochrome art on Pebble monochrome devices, and a transparent 25×25 menu glyph. The same source generates 144×144 and 80×80 color and grayscale branding icons. Generated assets are published individually on `builds/plugin-previews` with the PBW.

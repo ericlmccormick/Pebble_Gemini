@@ -813,7 +813,7 @@ static void main_window_load(Window *window) {
     s_pinwheel_layer = layer_create(GRect(bounds.size.w - 30, 90, 30, 30));
   #endif
 
-  s_logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_GEMINI_LOGO);
+  s_logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_WISP_LOGO);
   if (s_logo_bitmap) {
     bitmap_layer_set_bitmap(s_logo_layer, s_logo_bitmap);
     bitmap_layer_set_compositing_mode(s_logo_layer, GCompOpSet); 
