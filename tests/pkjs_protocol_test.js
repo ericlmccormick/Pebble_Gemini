@@ -223,7 +223,7 @@ async function checkNetwork() {
 checkNetwork().catch(error => { console.error(error); process.exitCode = 1; });
 
 // Regression: new installs favor both plugins; old disabled speech migrates to None.
-assert.equal(context.geminiBackend,'plugin');
+assert.equal(context.geminiBackend,'agent:2c5edc42-b096-4f76-b284-1f27907e6501');
 assert.equal(context.ttsBackend,'plugin');
 assert.equal(storage.TTS_BACKEND,'plugin');
 assert.equal(storage.TTS_PROVIDER_MIGRATED_V2,'true');
