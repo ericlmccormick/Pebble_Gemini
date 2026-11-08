@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gemini Conversation</title><style>body{font:16px system-ui,sans-serif;max-width:600px;margin:20px}input,button{font:inherit;padding:10px;margin:8px 0}input{width:100%;box-sizing:border-box}button{border:0;border-radius:7px;background:#1685b8;color:white}button.alt{background:#555}#status{white-space:pre-wrap;background:#eee;color:#222;padding:12px;border-radius:6px}</style></head><body>
+<h2>Gemini Conversation</h2><p>Provides text conversations to other Pebble apps. Google Gemini API usage is billed separately from consumer Gemini subscriptions.</p>
+<label>Google Gemini API key <input id="key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
+<label>Model <input id="model" type="text" value="gemini-2.5-flash" autocapitalize="off"></label>
+<button id="save">Save</button> <button id="clear" class="alt">Clear all conversations</button> <button id="forget" class="alt">Forget account and conversations</button>
+<p>Credentials are stored in Pebble secure storage and are not returned to apps. Conversation context is stored on this phone.</p><div id="status">Loading…</div>
+<script>(function(){function $(x){return document.getElementById(x);}
+function send(o){return Pebble.sendMessage('plugin',o);}
+function status(s){$('status').textContent=s;}
+send({type:'status'}).then(function(r){$('model').value=r.model||'gemini-2.5-flash';status(r.configured?'API key saved.':'Not configured.');}).catch(function(e){status(e.message);});
+$('save').onclick=async function(){try{var r=await send({type:'save',api_key:$('key').value,model:$('model').value.trim()});$('key').value='';status(r.ok?'Saved.':r.error);}catch(e){status(e.message);}};
+$('clear').onclick=async function(){if(!confirm('Clear all Gemini conversation history?'))return;var r=await send({type:'clear_history'});status(r.ok?'Conversation history cleared.':r.error);};
+$('forget').onclick=async function(){if(!confirm('Forget Gemini credentials and all history?'))return;var r=await send({type:'forget'});status(r.ok?'Credentials and history cleared.':r.error);};})();</script></body></html>
