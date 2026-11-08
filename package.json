@@ -82,7 +82,7 @@
     "watchapp": {
       "watchface": false
     },
-    "version": "1.6.3",
+    "version": "1.6.4",
     "manifestVersion": 2,
     "usesPermissions": [
       {
@@ -110,8 +110,24 @@
       {
         "name": "InvokeAction",
         "plugin": "2c5edc42-b096-4f76-b284-1f27907e6502"
+      },
+      {
+        "name": "InvokeAction",
+        "plugin": "3f97d5c5-bc28-48ba-b4af-e7ad7f6000f0"
+      },
+      {
+        "name": "InvokeAction",
+        "plugin": "0d33014e-5d56-42ea-9665-3ebf182b4cfb"
+      },
+      {
+        "name": "InvokeAction",
+        "plugin": "b8346592-cd59-4b83-9185-87d94e0734b0"
+      },
+      {
+        "name": "InvokeAction",
+        "plugin": "80ee6780-856f-411f-954b-4553ba7f2af8"
       }
     ]
   },
-  "version": "1.6.3"
+  "version": "1.6.4"
 }

@@ -6,6 +6,7 @@ var Clay = require('@rebble/clay');
 var GEMINI_PLUGIN_UUID='2c5edc42-b096-4f76-b284-1f27907e6501';
 var GOOGLE_TTS_PLUGIN_UUID='2c5edc42-b096-4f76-b284-1f27907e6502';
 var GoogleTtsStream=require('./google_tts_stream');
+var AgentPlugins=require('./agent_plugins');
 function useStoredBackend(key,hasLegacyKey){return localStorage.getItem(key)||(hasLegacyKey?'direct':'plugin');}
 
 
@@ -211,10 +212,7 @@ var apiKeysItems = [
     type:'select',messageKey:'GEMINI_BACKEND',label:'Gemini conversations',
     defaultValue:geminiBackend,
     description:'Plugin: set the key, model and pricing in Gemini Conversation plugin settings. Direct: use this app\'s legacy API settings.',
-    options:[
-      {label:'Gemini Conversation plugin (recommended)',value:'plugin'},
-      {label:'Direct Gemini API (legacy)',value:'direct'}
-    ]
+    options:AgentPlugins.options(Pebble,geminiBackend)
   },
   {
     type:'input',messageKey:'GEMINI_API_KEY',label:'Gemini API key (direct mode only)',
@@ -454,6 +452,13 @@ function lowPassFilter(samples) {
 // =========================================================================
 
 Pebble.addEventListener('showConfiguration', function() {
+  // The settings URL embeds the current installed-plugin catalogue; refresh
+  // each time this page is opened, not only when the app first starts.
+  clay.config.forEach(function(section){
+    (section.items||[]).forEach(function(item){
+      if(item.messageKey==='GEMINI_BACKEND')item.options=AgentPlugins.options(Pebble,geminiBackend);
+    });
+  });
   // Clay can load an older 'clay-settings' snapshot before defaults. Keep its
   // selected provider and legacy model/voice fields aligned with our saved
   // app settings so plugin mode is respected every time the webview opens.
@@ -485,7 +490,8 @@ Pebble.addEventListener('webviewclosed', function(e) {
     console.log('Conversation history cleared');
   }
   if(settings.GEMINI_BACKEND){
-    geminiBackend=settings.GEMINI_BACKEND.value==='direct'?'direct':'plugin';
+    var selectedAgent=String(settings.GEMINI_BACKEND.value||'plugin');
+    geminiBackend=selectedAgent==='direct'||selectedAgent==='plugin'||/^agent:[a-f0-9-]{36}$/.test(selectedAgent)?selectedAgent:'plugin';
     localStorage.setItem('GEMINI_BACKEND',geminiBackend);
   }
   if(settings.TTS_BACKEND){
@@ -568,9 +574,29 @@ Pebble.addEventListener('appmessage', function(e) {
       skipAudio = true;    
     }
 
-    fetchGeminiResponse(dict.TEXT, skipAudio); 
+    if(geminiBackend.indexOf('agent:')===0){
+      // A third-party agent may receive a message, but the current plugin
+      // contract returns a delivery receipt and not its full response.
+      sendToInstalledAgent(dict.TEXT);
+    }else{
+      fetchGeminiResponse(dict.TEXT, skipAudio);
+    } 
   }
 });
+
+function sendToInstalledAgent(text){
+  cancelCurrentAudio();
+  var generation=requestGeneration;
+  var agent=AgentPlugins.selected(Pebble,geminiBackend);
+  AgentPlugins.dispatch(Pebble,agent,text).then(function(receipt){
+    if(generation!==requestGeneration)return;
+    sendErrorToWatch(receipt.message);
+  }).catch(function(error){
+    if(generation!==requestGeneration)return;
+    // Never retry an uncertain delivery; it may already have been sent.
+    sendErrorToWatch('Agent send failed: '+String(error&&error.message||error).slice(0,145));
+  });
+}
 
 function sendErrorToWatch(msg) {
   Pebble.sendAppMessage({ 'COMMAND': 'TEXT_RESPONSE_NO_AUDIO', 'TEXT': msg }); 

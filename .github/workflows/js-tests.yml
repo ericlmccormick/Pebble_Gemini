@@ -20,8 +20,11 @@ jobs:
           node --check src/pkjs/google_tts_stream.js
           node --check tests/google_tts_adapter.test.cjs
           node --check tests/plugin_settings_ui.test.cjs
+          node --check src/pkjs/agent_plugins.js
+          node --check tests/agent_plugins.test.cjs
       - name: Test audio protocol and release hardening
         run: |
           node tests/pkjs_protocol_test.js
           node tests/google_tts_adapter.test.cjs
           node tests/plugin_settings_ui.test.cjs
+          node tests/agent_plugins.test.cjs

@@ -24,7 +24,7 @@ const context = {
     setItem: (key, value) => { storage[key] = String(value); },
     removeItem: key => { delete storage[key]; }
   },
-  require: id => id === './google_tts_stream' ? {create: () => ({stream: () => Promise.resolve()})} : Clay,
+  require: id => id === './google_tts_stream' ? {create: () => ({stream: () => Promise.resolve()})} : id==='./agent_plugins'?require('../src/pkjs/agent_plugins'):Clay,
   console,
   Date,
   atob: text => Buffer.from(text, 'base64').toString('binary'),

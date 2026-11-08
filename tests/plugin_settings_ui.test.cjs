@@ -31,12 +31,15 @@ function Clay(config,customizer){
 }
 function set(key,value){const item=items.get(key);assert.ok(item,key);item.state.value=value;if(item.state.change)item.state.change();}
 function shown(key){const item=items.get(key);assert.ok(item,key);return item.state.visible;}
-const Pebble={getActiveWatchInfo:()=>({platform:'emery'}),addEventListener:(name,fn)=>{listeners[name]=fn;},
+const Pebble={getActiveWatchInfo:()=>({platform:'emery'}),
+ enumeratePlugins:()=>[{uuid:'2c5edc42-b096-4f76-b284-1f27907e6501',name:'Gemini Conversation',actions:[{name:'conversation'}]},
+ {uuid:'3f97d5c5-bc28-48ba-b4af-e7ad7f6000f0',name:'ChatGPT',actions:[{name:'send_to_agent',parameters:{properties:{message:{type:'string'}}}}]}],
+ addEventListener:(name,fn)=>{listeners[name]=fn;},
  sendAppMessage:(value,ok)=>{if(ok)ok();},openURL:()=>{}};
 const localStorage={getItem:key=>Object.prototype.hasOwnProperty.call(storage,key)?storage[key]:null,
   setItem:(k,v)=>{storage[k]=String(v);},removeItem:k=>{delete storage[k];}};
 const ctx={Pebble,localStorage,Date,Math,JSON,Promise,console,atob:()=>'',setTimeout,clearTimeout,
- require:(name)=>name==='./google_tts_stream'?{create:()=>({stream:()=>Promise.resolve()})}:Clay};
+ require:(name)=>name==='./google_tts_stream'?{create:()=>({stream:()=>Promise.resolve()})}:name==='./agent_plugins'?require('../src/pkjs/agent_plugins'):Clay};
 const app=fs.readFileSync(path.join(root,'src/pkjs/index.js'),'utf8');
 vm.runInNewContext(app,ctx);
 // A stale Clay settings snapshot must not override the actual selected plugins.
@@ -51,6 +54,9 @@ assert.equal(synced.TTS_BACKEND,'plugin');
 assert.equal(synced.GEMINI_MODEL,'gemini-3.8-flash');
 assert.equal(synced.TTS_VOICE,'en-US-Wavenet-F');
 assert.equal(shown('GEMINI_API_KEY'),false);
+assert.ok(items.get('GEMINI_BACKEND').state.value==='plugin');
+const configuredOptions=JSON.stringify(app.match(/options:AgentPlugins.options\(Pebble,geminiBackend\)/));
+assert.ok(configuredOptions.includes('AgentPlugins.options'));
 assert.equal(shown('GEMINI_MODEL'),false);
 assert.equal(shown('TTS_API_KEY'),false);
 assert.equal(shown('TTS_VOICE'),false);
