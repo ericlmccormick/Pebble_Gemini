@@ -1,0 +1,40 @@
+name: Plugin build and regression checks
+on:
+  push:
+    branches: [main, 'feature/**', gemini-reliability-review-2026-11-03]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  plugin-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test plugin code and behavior
+        run: |
+          set -e
+          for project in plugins/gemini-conversation plugins/google-tts; do
+            if [ -f "$project/src/plugin/index.js" ]; then
+              node --check "$project/src/plugin/index.js"
+              node "$project/tests/plugin.test.cjs"
+            fi
+          done
+          if [ -f src/pkjs/google_tts_stream.js ]; then node --check src/pkjs/google_tts_stream.js; fi
+      - name: Package plugin PBWs independently
+        run: |
+          set -e
+          curl --fail --location --silent --show-error --output /tmp/pack-plugin-pbw.py \
+            https://raw.githubusercontent.com/coredevices/pebble-apps/11809f856b00b3ac5e91b6cf58c251db6aed4b56/scripts/pack-plugin-pbw.py
+          for project in plugins/gemini-conversation plugins/google-tts; do
+            if [ -f "$project/package.json" ]; then
+              python3 /tmp/pack-plugin-pbw.py "$project"
+              unzip -t "$project"/build/*.pbw
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pebble-ai-plugin-pbws
+          path: plugins/*/build/*.pbw
+          if-no-files-found: error
