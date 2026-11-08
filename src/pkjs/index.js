@@ -453,6 +453,9 @@ function lowPassFilter(samples) {
 // =========================================================================
 
 Pebble.addEventListener('showConfiguration', function() {
+  // Diagnostics distinguish a missing plugin from a filtered-out action.
+  // These contain only public manifest names/UUIDs, never saved credentials.
+  try{console.log('WISP agent discovery: '+JSON.stringify(AgentPlugins.diagnostics(Pebble)));}catch(e){}
   // The settings URL embeds the current installed-plugin catalogue; refresh
   // each time this page is opened, not only when the app first starts.
   clay.config.forEach(function(section){
