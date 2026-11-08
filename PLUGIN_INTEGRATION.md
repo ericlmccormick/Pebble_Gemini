@@ -44,3 +44,6 @@ All installed agent choices use the standard `send_to_agent({message})` action, 
 
 ## WISP logo assets
 Selected third icon: white speech bubble containing a waveform with blue broadcast arcs; black background. Current native app uses 48×48 color art on color devices, high-contrast 48×48 monochrome art on Pebble monochrome devices, and a transparent 25×25 menu glyph. The same source generates 144×144 and 80×80 color and grayscale branding icons. Generated assets are published individually on `builds/plugin-previews` with the PBW.
+
+## WISP agent discovery fix (v2.0.1)
+Agent discovery now identifies support by the published Core Devices `send_to_agent` action name, without requiring the optional expanded `parameters.properties.message` schema to survive enumeration. `AgentPlugins.diagnostics(Pebble)` reports the names, UUIDs, action names and inclusion flags of all plugins the Pebble host actually enumerates; this is available for troubleshooting without revealing API keys. If a plugin does not appear in `enumeratePlugins()`, WISP cannot select it. Confirm it is installed/enabled on the paired Pebble mobile app and that its installed version exports `send_to_agent`.

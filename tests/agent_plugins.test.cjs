@@ -6,7 +6,21 @@ const example=(uuid,name)=>({uuid,name,actions:[{name:'send_to_agent',
   parameters:{properties:{message:{type:'string'}}}}]});
 const installed=[example(ai,'AI Conversation'),example('3f97d5c5-bc28-48ba-b4af-e7ad7f6000f0','ChatGPT'),
   example('80ee6780-856f-411f-954b-4553ba7f2af8','Grok Bot')];
-const menu=Agent.options({enumeratePlugins:()=>installed},Agent.agentId());
+const loose=[
+ ...installed,
+ {uuid:'b8346592-cd59-4b83-9185-87d94e0734b0',name:'Muse',actions:[{name:'send_to_agent'}]},
+ {uuid:'0d33014e-5d56-42ea-9665-3ebf182b4cfb',name:'Claude',actions:['send_to_agent']},
+ {uuid:'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',name:'Weather',actions:[{name:'refresh'}]}
+];
+const menu=Agent.options({enumeratePlugins:()=>loose},Agent.agentId());
+assert.ok(menu.some(x=>x.label.includes('Muse')));
+assert.ok(menu.some(x=>x.label.includes('Claude')));
+assert.equal(menu.some(x=>x.label.includes('Weather')),false);
+const diagnostic=Agent.diagnostics({enumeratePlugins:()=>loose});
+assert.equal(diagnostic.installed,6);
+assert.equal(diagnostic.compatible,5);
+assert.equal(diagnostic.plugins.find(p=>p.name==='Weather').shown,false);
+assert.ok(diagnostic.plugins.find(p=>p.name==='Claude').shown);
 assert.equal(menu[0].value,'agent:'+ai);
 assert.ok(menu[0].label.includes('full replies'));
 assert.ok(menu.some(x=>x.label.includes('Grok Bot')&&x.label.includes('send only')));

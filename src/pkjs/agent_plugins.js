@@ -1,19 +1,36 @@
 'use strict';
 var UNIVERSAL_ID='2c5edc42-b096-4f76-b284-1f27907e6501';
 function agentId(){return 'agent:'+UNIVERSAL_ID;}
-function catalogue(Pebble){
+function rawCatalogue(Pebble){
   if(!Pebble||typeof Pebble.enumeratePlugins!=='function')return [];
-  var list;try{list=Pebble.enumeratePlugins();}catch(e){return [];}
-  if(!Array.isArray(list))return [];
-  return list.filter(function(p){return p&&typeof p.uuid==='string'&&
-    /^[a-f0-9-]{36}$/i.test(p.uuid)&&Array.isArray(p.actions)&&
-    p.actions.some(function(a){return a&&a.name==='send_to_agent'&&
-      a.parameters&&a.parameters.properties&&a.parameters.properties.message;});
+  try{
+    var list=Pebble.enumeratePlugins();
+    return Array.isArray(list)?list:[];
+  }catch(e){return [];}
+}
+function catalogue(Pebble){
+  // Pebble's discovery response can expose action names without retaining
+  // every parameter-schema field. The official agent contract is the action
+  // NAME; callers always pass {message} through the standard interface.
+  return rawCatalogue(Pebble).filter(function(p){
+    return p&&typeof p.uuid==='string'&&/^[a-f0-9-]{36}$/i.test(p.uuid)&&
+      Array.isArray(p.actions)&&p.actions.some(function(a){
+        return a&&(a.name==='send_to_agent'||a==='send_to_agent');
+      });
   }).map(function(p){
     var id=p.uuid.toLowerCase();
     return {uuid:id,name:String(p.name||'Agent').slice(0,50),kind:id===UNIVERSAL_ID?'full_reply':'send_only'};
   }).sort(function(a,b){return a.kind!==b.kind?(a.kind==='full_reply'?-1:1):a.name.localeCompare(b.name);})
   .filter(function(p,i,all){return all.findIndex(function(q){return q.uuid===p.uuid;})===i;});
+}
+function diagnostics(Pebble){
+  var raw=rawCatalogue(Pebble),included=catalogue(Pebble);
+  return {installed:raw.length,compatible:included.length,plugins:raw.map(function(p){
+    var id=p&&typeof p.uuid==='string'?p.uuid.toLowerCase():null;
+    return {uuid:id,name:p&&p.name||'Unnamed plugin',
+      actions:Array.isArray(p&&p.actions)?p.actions.map(function(a){return typeof a==='string'?a:a&&a.name;}).filter(Boolean):[],
+      shown:included.some(function(q){return q.uuid===id;})};
+  })};
 }
 function options(Pebble,selected){
   var all=catalogue(Pebble),native=all.filter(function(a){return a.uuid===UNIVERSAL_ID;})[0];
@@ -52,4 +69,4 @@ function dispatch(Pebble,agent,prompt){
   });
 }
 module.exports={catalogue:catalogue,options:options,selected:selected,dispatch:dispatch,
-  fullAnswer:fullAnswer,agentId:agentId,UNIVERSAL_ID:UNIVERSAL_ID};
+  fullAnswer:fullAnswer,agentId:agentId,UNIVERSAL_ID:UNIVERSAL_ID,diagnostics:diagnostics};
