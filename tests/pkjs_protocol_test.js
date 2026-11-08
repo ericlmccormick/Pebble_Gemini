@@ -23,7 +23,7 @@ const context = {
     getItem: key => Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null,
     setItem: (key, value) => { storage[key] = String(value); }
   },
-  require: () => Clay,
+  require: id => id === './google_tts_stream' ? {create: () => ({stream: () => Promise.resolve()})} : Clay,
   console,
   Date,
   atob: text => Buffer.from(text, 'base64').toString('binary'),
