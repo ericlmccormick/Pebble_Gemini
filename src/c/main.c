@@ -172,7 +172,9 @@ static void appearance_tick(struct tm *tick_time, TimeUnits units_changed) {
 // =========================================================================
 
 static void set_ui_state(UIState state);       
-static void window_click_config_provider(void *context); 
+static void window_click_config_provider(void *context);
+
+ 
 #ifdef PBL_SPEAKER
   static void up_volume_handler(ClickRecognizerRef recognizer, void *context);   
   static void down_volume_handler(ClickRecognizerRef recognizer, void *context); 
@@ -526,6 +528,23 @@ static void update_text_layout() {
   }
 #endif
 
+static void send_watch_status(void) {
+  DictionaryIterator *out = NULL;
+  if (app_message_outbox_begin(&out) != APP_MSG_OK || !out) return;
+  dict_write_cstring(out, MESSAGE_KEY_COMMAND, "WATCH_STATUS");
+#ifdef PBL_SPEAKER
+  dict_write_int32(out, MESSAGE_KEY_SPEAKER_CAPABLE, 1);
+  dict_write_int32(out, MESSAGE_KEY_VOLUME, (int)(s_volume * 100.0f + 0.5f));
+#else
+  dict_write_int32(out, MESSAGE_KEY_SPEAKER_CAPABLE, 0);
+  dict_write_int32(out, MESSAGE_KEY_VOLUME, 0);
+#endif
+  app_message_outbox_send();
+}
+static void watch_status_timer(void *data) {
+  send_watch_status();
+}
+
 // =========================================================================
 // SECTION 7: HARDWARE KEY BOARD REGISTRATION & INTERCEPT MAPPINGS
 // =========================================================================
@@ -537,6 +556,7 @@ static void select_short_click_handler(ClickRecognizerRef recognizer, void *cont
     stop_audio();                               
   }
   #endif
+  send_watch_status();
   dictation_session_start(s_dictation_session); 
 }
 
@@ -858,7 +878,12 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
 
     DictionaryIterator *iter;                   
     app_message_outbox_begin(&iter);            
-    dict_write_cstring(iter, MESSAGE_KEY_COMMAND, "DICTATION"); 
+    dict_write_cstring(iter, MESSAGE_KEY_COMMAND, "DICTATION");
+#ifdef PBL_SPEAKER
+    dict_write_int32(iter, MESSAGE_KEY_SPEAKER_CAPABLE, 1);
+#else
+    dict_write_int32(iter, MESSAGE_KEY_SPEAKER_CAPABLE, 0);
+#endif 
     dict_write_cstring(iter, MESSAGE_KEY_TEXT, transcription);  
     
     #ifdef PBL_SPEAKER
@@ -969,7 +994,8 @@ static void main_window_load(Window *window) {
   s_dictation_session = dictation_session_create(sizeof(s_gemini_text), dictation_session_callback, NULL);
 
   update_appearance();
-  set_ui_state(UI_STATE_IDLE); 
+  set_ui_state(UI_STATE_IDLE);
+  app_timer_register(1200, watch_status_timer, NULL); 
 }
 
 static void main_window_unload(Window *window) {
