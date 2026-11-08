@@ -167,7 +167,7 @@ function apiErrorMessage(error, service) {
   var message = String(error && error.message || error || '').toLowerCase();
   if (message.indexOf('timed out') >= 0) return service + ' timed out. Try again.';
   if (/plugin unavailable|plugin support|install\/configure plugin|plugin.*permission|unknown plugin/.test(message))
-    return 'Install/configure the '+(service==='Gemini'?'Gemini Conversation':'Google TTS')+' plugin and grant permissions.';
+    return 'Install/configure the '+(service==='Gemini'?'AI Conversation':'Google TTS')+' plugin and grant permissions.';
   if (/api.key|permission.denied|unauthenticated|401|403/.test(message)) return service + ' key/access error. Check settings.';
   if (/quota|rate.limit|resource.exhausted|429/.test(message)) return service + ' usage limit reached. Try later.';
   if (message.indexOf('voice') >= 0) return 'Voice unavailable. Select WaveNet F.';
@@ -226,7 +226,7 @@ var apiKeysItems = [
   {
     type:'select',messageKey:'GEMINI_MODEL',label:'Gemini model (direct mode only)',
     defaultValue:geminiModel,
-    description:'In plugin mode, this setting is controlled by the Gemini Conversation plugin.',
+    description:'In plugin mode, this setting is controlled by the AI Conversation plugin.',
     options:[
       {label:'Gemini 3.8 Flash',value:'gemini-3.8-flash'},
       {label:'Gemini 3.7 Flash',value:'gemini-3.7-flash'},
@@ -283,7 +283,7 @@ if(hasSpeaker){
 }
 
 var clayConfig = [
-  { "type": "heading", "defaultValue": "Gemini Configuration" }, 
+  { "type": "heading", "defaultValue": "WISP — Wrist Intelligence & Speech Portal" }, 
   {
     "type": "section", 
     "items": [
@@ -293,7 +293,7 @@ var clayConfig = [
         "messageKey": "CUSTOM_PERSONA",
         "label": "Custom Assistant Memory",
         "defaultValue": customPersona,
-        "description": "Tell Gemini who you are or how it should behave.",
+        "description": "Tell WISP how you want your AI assistant to respond, regardless of provider.",
         "attributes": {
           "spellcheck": "true"
         }

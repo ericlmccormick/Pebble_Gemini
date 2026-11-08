@@ -47,10 +47,10 @@ jobs:
                   assert any(platform in n for n in names), f'Missing {platform} binary in {pbws[0]}: {names}'
           print('Built and packaged all six targets:', ', '.join(sorted(expected)))
           PY
-      - name: Upload Pebble Gemini plugin-enabled PBW
+      - name: Upload WISP Pebble PBW
         uses: actions/upload-artifact@v4
         with:
-          name: gemini-watchapp-plugin-enabled-pbw
+          name: wisp-watchapp-plugin-enabled-pbw
           path: build/*.pbw
           if-no-files-found: error
       - name: Prepare direct-install watch app PBW
@@ -58,8 +58,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/pebble-plugin-previews
-          cp build/*.pbw /tmp/pebble-plugin-previews/Gemini_with_Voice_plugin_preview.pbw
-          unzip -t /tmp/pebble-plugin-previews/Gemini_with_Voice_plugin_preview.pbw >/dev/null
+          cp build/*.pbw /tmp/pebble-plugin-previews/WISP_preview.pbw
+          unzip -t /tmp/pebble-plugin-previews/WISP_preview.pbw >/dev/null
       - name: Publish preview files without ZIPs
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/gemini-plugin-integration'
         run: |
@@ -80,12 +80,12 @@ jobs:
           # Keep this branch download-only; compiler products and node_modules
           # can otherwise be swept up by an indiscriminate git add -A.
           git rm -rf --ignore-unmatch build node_modules .lock-waf_linux_build package-lock.json >/dev/null 2>&1 || true
-          git rm -f --ignore-unmatch Gemini_Conversation_preview.pbw Google_Cloud_TTS_preview.pbw
+          git rm -f --ignore-unmatch Gemini_Conversation_preview.pbw Google_Cloud_TTS_preview.pbw Gemini_with_Voice_plugin_preview.pbw
           git clean -fdx >/dev/null
-          cp /tmp/pebble-plugin-previews/Gemini_with_Voice_plugin_preview.pbw ./
-          printf 'Gemini with Voice watch app preview. Plugins are maintained in ericlmccormick/Pebble-Gemini-plugin and ericlmccormick/Pebble-Google-TTS-plugin.\n' > README.txt
+          cp /tmp/pebble-plugin-previews/WISP_preview.pbw ./
+          printf 'WISP (Wrist Intelligence & Speech Portal) watch app preview. Plugins are maintained in ericlmccormick/Pebble-Gemini-plugin and ericlmccormick/Pebble-Google-TTS-plugin.\n' > README.txt
           git add -u
-          git add Gemini_with_Voice_plugin_preview.pbw README.txt
+          git add WISP_preview.pbw README.txt
           if ! git diff --cached --quiet; then
             git commit -m "build: plugin previews from ${GITHUB_SHA}"
             git push origin HEAD:builds/plugin-previews

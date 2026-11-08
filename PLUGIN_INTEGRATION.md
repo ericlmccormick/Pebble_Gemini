@@ -1,4 +1,4 @@
-# Gemini with Voice — plugin integration
+# WISP — Wrist Intelligence & Speech Portal · plugin integration
 
 This feature branch contains the **watch application only**. The plugins have moved to their own GitHub repositories and are now independently maintained.
 
@@ -34,3 +34,10 @@ The phone app calls `Pebble.enumeratePlugins()` whenever the configuration page 
 
 ## v1.7.0 — Core Devices agent compatibility
 All installed agent choices use the standard `send_to_agent({message})` action, including AI Conversation v0.4.0. The old plugin-specific `conversation` call has been removed. The plugin itself chooses provider/model and maintains its default chat. Replies carrying explicit `reply_type:'assistant'`, validated response metadata, and matching universal plugin UUID are displayed and sent to Google TTS; send-only agents show their actual receipts without speech. The previous stored 'plugin' setting migrates to the universal agent selection. Direct Gemini mode remains optional.
+
+## v2.0.0 — WISP rebrand
+- Renamed the same app from **Gemini with Voice** to **WISP**. Expanded name: **Wrist Intelligence & Speech Portal**.
+- The watch displays **WISP**; the phone settings header and README/store listing include the expanded name.
+- Preserved watch app UUID `426c68c7-bdd7-445a-860a-ea587a188993`, persisted settings keys, existing agent selection, and independent speech plugin.
+- Package name is now `wisp`; no new app or separate install is necessary.
+- This naming update does not change the on-watch logo resource images; those remain the existing artwork until a separate replacement design is selected.

@@ -821,7 +821,7 @@ static void main_window_load(Window *window) {
   layer_add_child(s_idle_layer, bitmap_layer_get_layer(s_logo_layer)); 
 
   text_layer_set_font(s_title_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
-  text_layer_set_text(s_title_layer, "Gemini");
+  text_layer_set_text(s_title_layer, "WISP");
   layer_add_child(s_idle_layer, text_layer_get_layer(s_title_layer));
 
   text_layer_set_font(s_prompt_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
