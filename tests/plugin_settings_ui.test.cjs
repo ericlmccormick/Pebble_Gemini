@@ -66,19 +66,8 @@ assert.equal(storage.GEMINI_API_KEY,'existing-gemini-direct');
 assert.equal(storage.TTS_API_KEY,'existing-tts-direct');
 assert.equal(storage.GEMINI_MODEL,undefined);
 assert.equal(storage.TTS_VOICE,'en-US-Wavenet-F'); // App initializes the voice fallback once; hidden Clay values must not replace it.
-for(const p of ['plugins/gemini-conversation/src/config.html','plugins/google-tts/src/config.html']){
- const html=fs.readFileSync(path.join(root,p),'utf8');
- assert.match(html,/class="panel"/);
- assert.match(html,/prefers-color-scheme:dark/);
- assert.match(html,/<label for="key">/);
- assert.match(html,/aria-live="polite"/);
- assert.match(html,/min-height:47px/);
-}
-const gemHTML=fs.readFileSync(path.join(root,'plugins/gemini-conversation/src/config.html'),'utf8');
-assert.match(gemHTML,/<select id="model"/);
-assert.match(gemHTML,/Refresh available models/);
-assert.match(gemHTML,/1 million text-input/);
-const ttsHTML=fs.readFileSync(path.join(root,'plugins/google-tts/src/config.html'),'utf8');
-assert.match(ttsHTML,/<select id="voice"/);
-assert.match(ttsHTML,/WaveNet/);
-console.log('PASS: responsive plugin settings and live provider-dependent Clay visibility');
+const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+const permissions=manifest.pebble.usesPermissions||[];
+assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6501'&&p.name==='GeminiConverse'));
+assert.ok(permissions.some(p=>p.plugin==='2c5edc42-b096-4f76-b284-1f27907e6502'&&p.name==='GoogleTtsSpeak'));
+console.log('PASS: provider-dependent Clay visibility and stable external plugin permissions');

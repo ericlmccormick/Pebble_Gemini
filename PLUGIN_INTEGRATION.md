@@ -1,27 +1,22 @@
-# Gemini Conversation + Google Cloud TTS plugin integration (experimental)
+# Gemini with Voice — plugin integration
 
-Three branches in this repository (no changes to `main`):
-- `feature/gemini-conversation-plugin`: standalone Gemini text conversation plugin in `plugins/gemini-conversation/`.
-- `feature/google-tts-plugin`: standalone Google Cloud TTS plugin in `plugins/google-tts/`, including versioned MIT Home Assistant-derived audio SDK.
-- `feature/gemini-plugin-integration`: both plugin directories plus Gemini watch-app integration.
+This feature branch contains the **watch application only**. The plugins have moved to their own GitHub repositories and are now independently maintained.
 
-## How the app works
-- Backends are independently selectable in watchapp settings. New installs default to plugins; existing users with direct API keys stay on direct mode until they opt in.
-- Gemini text request → Gemini plugin `conversation` → return text + `conversation_id`. Plugin stores the API key; app stores only its conversation ID.
-- Optional Google TTS plugin `tts_prepare` → verified WAV header and first chunk → rolling `tts_chunk` requests with per-chunk and whole-WAV checksums → 8 kHz mono PCM16 → existing app IMA-ADPCM encoding → 360-byte acknowledged AppMessages → Pebble Time 2/Duo speaker.
-- The existing watch C decoder and ACK/SEQ streaming protocol are deliberately preserved. **Do not install the copied Home Assistant audio watch SDK in this app without also migrating the C protocol.** The included `google_tts_stream.js` is an adapter inspired by the HA SDK and uses its exact plugin-side TTS session contract.
-- Both plugins can be used separately by other apps; Google TTS doesn't need Gemini; Gemini plugin doesn't require TTS.
-- Plugin app permission prompts are required; API access and Google Cloud TTS may incur separately billed charges.
+| Component | Repository | UUID | Version |
+| --- | --- | --- | --- |
+| Gemini Conversation plugin | [Pebble-Gemini-plugin](https://github.com/ericlmccormick/Pebble-Gemini-plugin) | `2c5edc42-b096-4f76-b284-1f27907e6501` | 0.2.0 |
+| Google Cloud TTS plugin | [Pebble-Google-TTS-plugin](https://github.com/ericlmccormick/Pebble-Google-TTS-plugin) | `2c5edc42-b096-4f76-b284-1f27907e6502` | 0.2.0 |
+| Gemini with Voice app | [Pebble_Gemini](https://github.com/ericlmccormick/Pebble_Gemini) | Watch app UUID unchanged | 1.6.1 preview |
 
-## Build
-Pushes automatically run the plugin unit tests and package each independent .pbw through the pinned Core Devices packer. The existing native watch build workflow should be run against this branch with **SDK 4.44+** because plugin permissions require manifest v2. The feature branch has not been hardware-validated.
+## Architecture
+- Gemini Conversation plugin: `conversation` action returns text plus `conversation_id`. The plugin exclusively stores its Google API key and selected model. The app stores only the conversation ID.
+- Google Cloud TTS plugin: `tts_prepare`, `tts_chunk`, `tts_release` return checksum-verified 8 kHz mono PCM16 WAV chunks. The app adapter converts to IMA-ADPCM and sends acknowledged 360-byte BLE AppMessages.
+- The native watch decoder keeps its existing `AUDIO_ACK/SEQ/STREAM_ID` protocol, which differs from Home Assistant's `AUDIO_RESET` protocol. Do not mix them.
+- Either plugin can be installed and used independently with compatible apps.
+- New installs select plugin providers by default. Existing direct API key users remain in direct mode unless they opt in. Plugin-selected settings hide direct key/model/voice fields but preserve their saved values.
 
-## Plan for splitting repositories
-Copy `plugins/gemini-conversation/` and `plugins/google-tts/` each to the root of a separate repository, preserving UUIDs, action names and the 6000-byte chunk format. Keep copies of the audio SDK pinned to a commit. Then update the app's dependency documentation, not its plugin IDs.
-
-## Provider-aware settings (v1.6.1)
-Gemini Conversation v0.2.0 includes a model dropdown, account-specific model refresh, and per-million-token pricing guidance. Google Cloud TTS v0.2.0 has a readable light/dark settings UI, grouped WaveNet/Neural2/Chirp voices, and price guidance. The plugin settings own API credentials and model or voice selection.
-
-When Gemini Conversation plugin is selected, the app hides direct Gemini API key and model fields. When Google Cloud TTS plugin is selected, the app hides direct TTS key and voice fields. If speech is disabled, it hides direct TTS inputs regardless of source. The provider selectors, voice enabled toggle, personalization, font size, and conversation reset remain visible.
-
-The app retains direct-mode values for rollback; hidden fields do not overwrite saved settings. Both plugins remain independently installable, and all three builds are versioned as previews. Model availability is pulled from Google's account-specific API list; prices are reference guidance from Google's official sheets.
+## Development and installation
+- Install/configure the plugins from their own repositories. Each plugin has its own CI, downloadable PBW, tests and permanent source-of-truth.
+- Build the app on the `feature/gemini-plugin-integration` branch. CI builds six native platforms and publishes the **watch app PBW only** to `builds/plugin-previews`.
+- The original `feature/gemini-conversation-plugin` and `feature/google-tts-plugin` branches in this repository are historical staging snapshots; do not publish new plugin releases from them.
+- Cloud usage is billed separately from personal Gemini subscriptions. Plugin permissions require a compatible Pebble phone app. These are development builds pending physical watch validation.
