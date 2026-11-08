@@ -3,7 +3,10 @@ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),asse
 const root=path.join(__dirname,'..');
 const storage={GEMINI_BACKEND:'plugin',TTS_BACKEND:'plugin',GEMINI_API_KEY:'existing-gemini-direct',TTS_API_KEY:'existing-tts-direct'};
 const listeners={},items=new Map(),events={};
+let clayInstances=0,renderedConfigs=[];
 function Clay(config,customizer){
+  clayInstances++;
+  renderedConfigs.push(JSON.parse(JSON.stringify(config)));
   this.config=config;
   this.EVENTS={AFTER_BUILD:'afterBuild'};
   this.generateUrl=()=>'/settings';
@@ -49,6 +52,13 @@ storage['clay-settings']=JSON.stringify({
   GEMINI_MODEL:'gemini-2.5-pro', TTS_VOICE:'en-US-Neural2-C'
 });
 listeners.showConfiguration();
+assert.equal(clayInstances,2,'settings should rebuild Clay with a fresh plugin list');
+const providerSection=renderedConfigs[1].filter(s=>Array.isArray(s.items)&&s.items.some(i=>i.messageKey==='GEMINI_BACKEND'))[0];
+const providerField=providerSection.items.find(i=>i.messageKey==='GEMINI_BACKEND');
+assert.equal(providerField.options.filter(o=>o.value.startsWith('agent:')).length,5);
+assert.ok(providerField.options.some(o=>o.label.includes('Grok Bot')&&o.label.includes('not detected')));
+const diagnosticsSection=renderedConfigs[1].filter(s=>Array.isArray(s.items)&&s.items.some(i=>i.wispDiscoveryDiagnostic))[0];
+assert.match(diagnosticsSection.items.find(i=>i.wispDiscoveryDiagnostic).defaultValue,/Claude: not reported/);
 const synced=JSON.parse(storage['clay-settings']);
 assert.equal(synced.GEMINI_BACKEND,'agent:2c5edc42-b096-4f76-b284-1f27907e6501');
 assert.equal(synced.TTS_BACKEND,'plugin');

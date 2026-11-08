@@ -307,6 +307,13 @@ var clayConfig = [
   {
     "type": "section",
     "items": [
+      {type:'heading',defaultValue:'Agent discovery diagnostics'},
+      {type:'text',wispDiscoveryDiagnostic:true,defaultValue:AgentPlugins.diagnosticText(Pebble)}
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
       { "type": "heading", "defaultValue": "Conversation & Privacy" },
       { "type": "text", "defaultValue": "Your current provider handles model and voice settings. Plugin credentials are stored in Pebble secure storage; direct-mode keys remain in legacy app storage. Conversation history is stored on the phone. API usage may incur charges." },
       { "type": "toggle", "messageKey": "CLEAR_HISTORY", "label": "Clear Conversation History on Save",
@@ -456,13 +463,21 @@ Pebble.addEventListener('showConfiguration', function() {
   // Diagnostics distinguish a missing plugin from a filtered-out action.
   // These contain only public manifest names/UUIDs, never saved credentials.
   try{console.log('WISP agent discovery: '+JSON.stringify(AgentPlugins.diagnostics(Pebble)));}catch(e){}
-  // The settings URL embeds the current installed-plugin catalogue; refresh
-  // each time this page is opened, not only when the app first starts.
-  clay.config.forEach(function(section){
+  // Refresh the original source tree, then reconstruct Clay from scratch.
+  // Merely mutating an already constructed Clay object can retain its
+  // originally compiled select options in the generated configuration.
+  clayConfig.forEach(function(section){
     (section.items||[]).forEach(function(item){
-      if(item.messageKey==='GEMINI_BACKEND')item.options=AgentPlugins.options(Pebble,geminiBackend);
+      if(item.messageKey==='GEMINI_BACKEND'){
+        item.options=AgentPlugins.options(Pebble,geminiBackend);
+        item.defaultValue=geminiBackend;
+      }
+      if(item.type==='text'&&item.wispDiscoveryDiagnostic){
+        item.defaultValue=AgentPlugins.diagnosticText(Pebble);
+      }
     });
   });
+  clay=new Clay(clayConfig,customClay,{autoHandleEvents:false});
   // Clay can load an older 'clay-settings' snapshot before defaults. Keep its
   // selected provider and legacy model/voice fields aligned with our saved
   // app settings so plugin mode is respected every time the webview opens.
