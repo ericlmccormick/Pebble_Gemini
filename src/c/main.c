@@ -137,15 +137,17 @@ static void set_status(const char* status) {
   }
 }
 
-static void update_text_layout() {
-  Layer *window_layer = window_get_root_layer(s_main_window); 
-  int16_t screen_width = layer_get_bounds(window_layer).size.w; 
-  int16_t text_width = screen_width - 10;       
-  text_layer_set_size(s_text_layer, GSize(text_width, 2000)); 
-  GSize max_size = text_layer_get_content_size(s_text_layer); 
-  max_size.h += 30;                             
-  text_layer_set_size(s_text_layer, max_size);  
-  scroll_layer_set_content_size(s_scroll_layer, GSize(screen_width, max_size.h + 10)); 
+static void update_text_layout(void) {
+  GSize screen = layer_get_bounds(window_get_root_layer(s_main_window)).size;
+  int width = screen.w - 10;
+  text_layer_set_size(s_text_layer, GSize(width, 2000));
+  GSize measured = text_layer_get_content_size(s_text_layer);
+  text_layer_set_size(s_text_layer, GSize(width, measured.h + 6));
+  int height = measured.h + 16;
+#ifdef PBL_ROUND
+  height = ((height + screen.h - 1) / screen.h) * screen.h;
+#endif
+  scroll_layer_set_content_size(s_scroll_layer, GSize(screen.w, height));
 }
 
 // =========================================================================
@@ -431,6 +433,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       text_layer_set_text(s_text_layer, s_gemini_text); 
       update_text_layout();                     
       
+      scroll_layer_set_content_offset(s_scroll_layer, GPointZero, false);
       set_ui_state(UI_STATE_RESULTS);          
 
       #ifdef PBL_SPEAKER
@@ -517,13 +520,18 @@ static void main_window_load(Window *window) {
   text_layer_set_text_alignment(s_text_layer, GTextAlignmentLeft);
   text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
 
-  #if defined(PBL_ROUND) 
-    text_layer_enable_screen_text_flow_and_paging(s_text_layer, 5); 
-  #endif
+  scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_text_layer));
+#ifdef PBL_ROUND
+  text_layer_enable_screen_text_flow_and_paging(s_text_layer, 8);
+  scroll_layer_set_paging(s_scroll_layer, true);
+  scroll_layer_set_shadow_hidden(s_scroll_layer, true);
+#endif
 
-  scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_text_layer)); 
-
+#ifdef PBL_ROUND
+  s_status_layer = text_layer_create(GRect(bounds.size.w / 5, bounds.size.h - 40, bounds.size.w * 3 / 5, 22));
+#else
   s_status_layer = text_layer_create(GRect(0, bounds.size.h - 24, bounds.size.w, 24));
+#endif
   text_layer_set_background_color(s_status_layer, GColorBlack);
   text_layer_set_text_color(s_status_layer, GColorWhite);
   text_layer_set_font(s_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
@@ -538,7 +546,7 @@ static void main_window_load(Window *window) {
     s_title_layer = text_layer_create(GRect(0, 65, bounds.size.w, 35));
     text_layer_set_text_alignment(s_title_layer, GTextAlignmentCenter); 
 
-    s_prompt_layer = text_layer_create(GRect(10, 105, bounds.size.w - 20, 50));
+    s_prompt_layer = text_layer_create(GRect(26, 104, bounds.size.w - 52, 48));
     text_layer_set_text_alignment(s_prompt_layer, GTextAlignmentCenter); 
 
     s_arrow_layer = layer_create(GRect(bounds.size.w - 30, 110, 20, 20));
