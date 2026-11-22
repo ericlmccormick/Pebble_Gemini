@@ -2,7 +2,7 @@
 
 **Current source version:** 1.4.4. **Display name:** Gemini with voice.
 
-This repository preserves the original standalone Gemini voice app. The separate **[WISP](https://github.com/ericlmccormick/Pebble-WISP)** project is its unreleased successor and should not be confused with this released app.
+**Retired.** This repository preserves the original Gemini with Voice app for existing installs. For ongoing development, use [WISP](https://github.com/ericlmccormick/Pebble-WISP) with [Universal AI](https://github.com/ericlmccormick/Pebble-Universal-AI) and, for spoken replies, [Universal TTS](https://github.com/ericlmccormick/Pebble-Universal-TTS).
 
 ## Setup
 
