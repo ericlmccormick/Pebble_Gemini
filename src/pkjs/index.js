@@ -210,9 +210,17 @@ function updateSolarTheme() {
 }
 
 var clayConfig = [
-  {type: 'select', messageKey: 'THEME_MODE', label: 'Theme', defaultValue: themeMode,
-    options: [{label: 'Day', value: 'day'}, {label: 'Night', value: 'night'}, {label: 'Auto', value: 'auto'}]},
   { "type": "heading", "defaultValue": "Gemini Configuration" }, 
+  {type: 'section', items: [
+    {type: 'heading', defaultValue: 'Appearance'},
+    {type: 'select', messageKey: 'THEME_MODE', label: 'Theme', defaultValue: themeMode,
+      description: 'Auto follows sunrise and sunset. Without saved times, Day runs from 7 a.m. to 7 p.m.',
+      options: [
+        {label: 'Day', value: 'day'},
+        {label: 'Night', value: 'night'},
+        {label: 'Auto', value: 'auto'}
+      ]}
+  ]},
   {
     "type": "section", 
     "items": [
