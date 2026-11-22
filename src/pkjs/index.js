@@ -202,7 +202,16 @@ if (hasSpeaker) {
   });
 }
 
+var themeMode = localStorage.getItem('gemini_theme_mode') || 'day';
+var weatherTheme;
+function updateSolarTheme() {
+  if (!weatherTheme) weatherTheme = require('./theme-weather').create(Pebble, require('message_keys'));
+  weatherTheme.setAuto(themeMode === 'auto');
+}
+
 var clayConfig = [
+  {type: 'select', messageKey: 'THEME_MODE', label: 'Theme', defaultValue: themeMode,
+    options: [{label: 'Day', value: 'day'}, {label: 'Night', value: 'night'}, {label: 'Auto', value: 'auto'}]},
   { "type": "heading", "defaultValue": "Gemini Configuration" }, 
   {
     "type": "section", 
@@ -400,6 +409,12 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem("AUDIO_PROFILE", audioProfile); 
   }
 
+  if (settings.THEME_MODE && /^(day|night|auto)$/.test(settings.THEME_MODE.value)) {
+    themeMode = settings.THEME_MODE.value;
+    localStorage.setItem('gemini_theme_mode', themeMode);
+    Pebble.sendAppMessage({THEME_MODE: themeMode}, updateSolarTheme, updateSolarTheme);
+  }
+
   if (settings.FONT_SIZE) {
     fontSize = settings.FONT_SIZE.value;
     localStorage.setItem("FONT_SIZE", fontSize);         
@@ -408,6 +423,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
 });
 
 Pebble.addEventListener('ready', function() {
+  updateSolarTheme();
   if (fontSize != 24) {
     Pebble.sendAppMessage({ 'COMMAND': 'UPDATE_FONT', 'FONT_SIZE': parseInt(fontSize) }); 
   }

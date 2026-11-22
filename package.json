@@ -11,12 +11,18 @@
         ],
         "displayName": "Gemini with voice",
         "enableMultiJS": true,
+        "usesPermissions": [{"name": "Location", "reason": "Read sunrise and sunset for Auto appearance", "required": false}],
         "messageKeys": [
             "COMMAND",
             "TEXT",
             "CHUNK",
             "FONT_SIZE",
-            "VOLUME"
+            "VOLUME",
+            "THEME_MODE",
+            "VG_SUNRISE",
+            "VG_SUNSET",
+            "VG_NEXT_SUNRISE",
+            "VG_NEXT_SUNSET"
         ],
         "projectType": "native",
         "resources": {

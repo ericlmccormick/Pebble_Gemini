@@ -2,7 +2,8 @@
 // SECTION 1: SYSTEM HEADERS & PREPROCESSOR MACROS
 // =========================================================================
 
-#include <pebble.h> 
+#include <pebble.h>
+#include "solar_theme.h"
 
 #define MAX_TEXT_LENGTH 2048 
 
@@ -101,12 +102,34 @@ static void pinwheel_timer_callback(void *data) {
   }
 }
 
+#define PERSIST_KEY_THEME_MODE 437
+static VGThemeMode s_theme_mode = VG_THEME_DAY;
+static bool s_dark;
+static GColor theme_foreground(void) { return s_dark ? GColorWhite : GColorBlack; }
+static void apply_theme(void) {
+  s_dark = solar_theme_dark(s_theme_mode);
+  GColor background = s_dark ? GColorBlack : GColorWhite;
+  GColor foreground = theme_foreground();
+  if (s_main_window) window_set_background_color(s_main_window, background);
+  TextLayer *layers[] = {s_text_layer, s_prompt_layer, s_title_layer};
+  for (unsigned i = 0; i < ARRAY_LENGTH(layers); ++i) {
+    if (!layers[i]) continue;
+    text_layer_set_text_color(layers[i], foreground);
+    text_layer_set_background_color(layers[i], GColorClear);
+  }
+  if (s_pinwheel_layer) layer_mark_dirty(s_pinwheel_layer);
+  if (s_arrow_layer) layer_mark_dirty(s_arrow_layer);
+}
+static void appearance_tick(struct tm *local, TimeUnits units) {
+  if (s_dark != solar_theme_dark(s_theme_mode)) apply_theme();
+}
+
 static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
   if (s_current_state != UI_STATE_THINKING) return; 
   GRect bounds = layer_get_bounds(layer);        
   GPoint center = grect_center_point(&bounds);  
   int radius = 9;                               
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, theme_foreground());
   graphics_context_set_stroke_width(ctx, 3);    
   for(int i = 0; i < 4; i++) {                  
      int32_t angle = TRIG_MAX_ANGLE * (s_pinwheel_angle + i * 90) / 360; 
@@ -118,7 +141,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
 
 static void arrow_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, theme_foreground());
   graphics_context_set_stroke_width(ctx, 3);    
   int y = bounds.size.h / 2;                    
   int x_start = 0;                              
@@ -411,6 +434,16 @@ static void set_ui_state(UIState state) {
 // =========================================================================
 
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
+  if (solar_theme_receive(iterator)) { apply_theme(); return; }
+  Tuple *theme = dict_find(iterator, MESSAGE_KEY_THEME_MODE);
+  if (theme && theme->type == TUPLE_CSTRING) {
+    const char *mode = theme->value->cstring;
+    s_theme_mode = strcmp(mode, "night") == 0 ? VG_THEME_NIGHT :
+                   strcmp(mode, "auto") == 0 ? VG_THEME_AUTO : VG_THEME_DAY;
+    persist_write_int(PERSIST_KEY_THEME_MODE, s_theme_mode);
+    apply_theme();
+    return;
+  }
   Tuple *command_tuple = dict_find(iterator, MESSAGE_KEY_COMMAND); 
   if (!command_tuple) return;                   
 
@@ -576,7 +609,8 @@ static void main_window_load(Window *window) {
   layer_set_update_proc(s_pinwheel_layer, pinwheel_update_proc); 
   layer_add_child(s_idle_layer, s_pinwheel_layer);
 
-  layer_add_child(window_layer, s_idle_layer); 
+  layer_add_child(window_layer, s_idle_layer);
+  apply_theme();
 
   #ifdef PBL_SPEAKER
     s_volume_text_layer = text_layer_create(GRect(bounds.size.w - 85, 5, 80, 24));
@@ -618,6 +652,12 @@ static void main_window_unload(Window *window) {
 // =========================================================================
 
 static void init() {
+  solar_theme_load();
+  if (persist_exists(PERSIST_KEY_THEME_MODE)) {
+    int stored = persist_read_int(PERSIST_KEY_THEME_MODE);
+    if (stored >= VG_THEME_DAY && stored <= VG_THEME_AUTO) s_theme_mode = stored;
+  }
+  tick_timer_service_subscribe(MINUTE_UNIT, appearance_tick);
   #ifdef PBL_SPEAKER
     if (persist_exists(PERSIST_KEY_VOLUME)) s_volume = persist_read_int(PERSIST_KEY_VOLUME) / 100.0f;
     else s_volume = 1.0f; 
@@ -635,7 +675,8 @@ static void init() {
   window_stack_push(s_main_window, true);       
 }
 
-static void deinit() { 
+static void deinit() {
+  tick_timer_service_unsubscribe();
   window_destroy(s_main_window);                
 }
 
