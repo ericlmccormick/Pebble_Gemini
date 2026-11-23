@@ -1,7 +1,7 @@
 {
     "author": "Eric McCormick",
     "dependencies": {
-        "pebble-clay": "^1.0.4"
+        "@rebble/clay": "^1.1.0"
     },
     "keywords": [],
     "name": "gemini-with-voice",
@@ -16,7 +16,12 @@
             "TEXT",
             "CHUNK",
             "FONT_SIZE",
-            "VOLUME"
+            "VOLUME",
+            "STREAM_ID",
+            "SEQ",
+            "BUFFER_FREE",
+            "SENTENCE_TOTAL",
+            "BUFFER_HINT"
         ],
         "projectType": "native",
         "resources": {
@@ -69,12 +74,15 @@
             "basalt",
             "chalk",
             "diorite",
-            "emery"
+            "flint",
+            "emery",
+            "gabbro"
         ],
         "uuid": "426c68c7-bdd7-445a-860a-ea587a188993",
         "watchapp": {
             "watchface": false
-        }
+        },
+        "version": "1.5.0"
     },
-    "version": "1.4.4"
+    "version": "1.5.0"
 }

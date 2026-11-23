@@ -2,7 +2,7 @@
 // SECTION 1: LIBRARY IMPORT & INITIALIZATION
 // =========================================================================
 
-var Clay = require('pebble-clay'); 
+var Clay = require('@rebble/clay'); 
 
 // =========================================================================
 // SECTION 2: STORAGE MEMORY RECOVERY & TOGGLE LOGIC
@@ -14,9 +14,30 @@ var fontSize = localStorage.getItem("FONT_SIZE") || 24;
 var customPersona = localStorage.getItem("CUSTOM_PERSONA") || ""; 
 
 // Restore dynamic dropdown configurations with updated default
-var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.5-flash"; 
-var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Journey-F";        
-var audioProfile = localStorage.getItem("AUDIO_PROFILE") || "8k-16b";          
+var geminiModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.8-flash"; 
+// Migrate legacy Chirp3 aliases, which never existed in Google's TTS catalog.
+var ttsVoice = localStorage.getItem("TTS_VOICE") || "en-US-Wavenet-F";
+var TTS_VOICE_ALIASES = {
+  "en-US-Chirp3-HD-F": "en-US-Chirp3-HD-Kore",
+  "en-US-Chirp3-HD-M": "en-US-Chirp3-HD-Charon",
+  "en-US-Studio-O": "en-US-Wavenet-F",
+  "en-US-Studio-M": "en-US-Wavenet-D",
+  "en-US-Journey-F": "en-US-Wavenet-F",
+  "en-US-Journey-D": "en-US-Wavenet-D"
+};
+var SUPPORTED_TTS_VOICES = [
+  "en-US-Wavenet-C", "en-US-Wavenet-D", "en-US-Wavenet-F",
+  "en-US-Neural2-C", "en-US-Neural2-D", "en-US-Neural2-F",
+  "en-US-Chirp3-HD-Kore", "en-US-Chirp3-HD-Aoede",
+  "en-US-Chirp3-HD-Leda", "en-US-Chirp3-HD-Zephyr",
+  "en-US-Chirp3-HD-Charon", "en-US-Chirp3-HD-Puck"
+];
+function normalizeTtsVoice(name) {
+  var migrated = TTS_VOICE_ALIASES[name] || name;
+  return SUPPORTED_TTS_VOICES.indexOf(migrated) >= 0 ? migrated : "en-US-Wavenet-F";
+}
+ttsVoice = normalizeTtsVoice(ttsVoice);
+localStorage.setItem("TTS_VOICE", ttsVoice);        
 
 // LOGIC: Evaluate the user's TTS preference based on history
 var storedToggle = localStorage.getItem("ENABLE_TTS");
@@ -34,11 +55,35 @@ if (storedToggle === "true") {
 // SECTION 3: SYSTEM SCOPE DECLARATIONS
 // =========================================================================
 
-var conversationHistory = []; 
+var conversationHistory = [];
+var MAX_HISTORY_MESSAGES = 6;
+var MAX_HISTORY_CHARACTERS = 8000;
+var GEMINI_TIMEOUT_MS = 30000;
+var TTS_TIMEOUT_MS = 20000;
+function trimConversationHistory(items) {
+  if (!Array.isArray(items)) return [];
+  var pairs = [];
+  for (var i = 0; i + 1 < items.length; i++) {
+    var user = items[i], model = items[i + 1];
+    if (user && model && user.role === 'user' && model.role === 'model' &&
+        Array.isArray(user.parts) && Array.isArray(model.parts) &&
+        user.parts[0] && model.parts[0] && typeof user.parts[0].text === 'string' && typeof model.parts[0].text === 'string') {
+      pairs.push([user, model]); i++;
+    }
+  }
+  var result = [], chars = 0;
+  for (var j = pairs.length - 1; j >= 0 && result.length < MAX_HISTORY_MESSAGES; j--) {
+    var size = JSON.stringify(pairs[j]).length;
+    if (chars + size > MAX_HISTORY_CHARACTERS) break;
+    chars += size;
+    result.unshift(pairs[j][0], pairs[j][1]);
+  }
+  return result;
+}
 try {
   var storedHistory = localStorage.getItem("CHAT_HISTORY"); 
   if (storedHistory) {                                      
-    conversationHistory = JSON.parse(storedHistory);        
+    conversationHistory = trimConversationHistory(JSON.parse(storedHistory));        
   }
 } catch (e) {
   conversationHistory = [];                                 
@@ -48,19 +93,19 @@ try {
 // SECTION 4: ECOSYSTEM PLATFORM DETECTION
 // =========================================================================
 
-var watchInfo = null;       
-var hasSpeaker = false;     
+// Pebble 2 Duo (flint) and Time 2 (emery) have speakers. Round 2
+// (gabbro) has a microphone but no speaker: use dictation + text only.
+// Unknown hardware defaults to text-only until its capabilities are known.
+function platformHasSpeaker(platform) {
+  return platform === 'flint' || platform === 'emery';
+}
+var watchInfo = null;
+var hasSpeaker = false;
 try {
-  watchInfo = Pebble.getActiveWatchInfo(); 
-  if (watchInfo && watchInfo.platform) {  
-    if (watchInfo.platform === 'emery' || watchInfo.platform === 'gabbro') {
-      hasSpeaker = true;    
-    }
-  } else {
-    hasSpeaker = true;      
-  }
+  watchInfo = Pebble.getActiveWatchInfo();
+  hasSpeaker = !!(watchInfo && platformHasSpeaker(watchInfo.platform));
 } catch (err) {
-  hasSpeaker = true;        
+  hasSpeaker = false;
 }
 
 // =========================================================================
@@ -70,7 +115,50 @@ try {
 var sentenceQueue = [];    
 var readyAudioQueue = [];  
 var isFetchingTTS = false; 
-var isSendingBLE = false;  
+var isSendingBLE = false;
+var requestGeneration = 0;
+var MAX_BLE_RETRIES = 5;
+var nextStreamId = (Date.now() & 0x7fffffff) || 1;
+var activeTransfer = null;
+var streamEndSent = false;
+var AUDIO_PACKET_BYTES = 360; // Leaves room for command/session/sequence tuples.
+var ACK_TIMEOUT_MS = 1800;
+var rateBytesPerSecond = 5200; // Conservative initial link estimate.
+var lastAckTime = 0;
+function requestJsonWithTimeout(url, options, timeoutMs) {
+  return new Promise(function(resolve, reject) {
+    var done = false;
+    var timer = setTimeout(function() {
+      if (!done) { done = true; reject(new Error('Request timed out')); }
+    }, timeoutMs);
+    try {
+      fetch(url, options).then(function(response) {
+        return response.json().then(function(data) {
+          if (response.ok === false && !data.error) data.error = {message: 'HTTP ' + response.status};
+          return data;
+        });
+      }).then(function(data) {
+        if (done) return;
+        done = true; clearTimeout(timer); resolve(data);
+      }).catch(function(err) {
+        if (done) return;
+        done = true; clearTimeout(timer); reject(err);
+      });
+    } catch (err) {
+      if (done) return;
+      done = true; clearTimeout(timer); reject(err);
+    }
+  });
+}
+function apiErrorMessage(error, service) {
+  var message = String(error && error.message || error || '').toLowerCase();
+  if (message.indexOf('timed out') >= 0) return service + ' timed out. Try again.';
+  if (/api.key|permission.denied|unauthenticated|401|403/.test(message)) return service + ' key/access error. Check settings.';
+  if (/quota|rate.limit|resource.exhausted|429/.test(message)) return service + ' usage limit reached. Try later.';
+  if (message.indexOf('voice') >= 0) return 'Voice unavailable. Select WaveNet F.';
+  return service + ' request failed. Check connection.';
+}
+  
 
 var js_adpcm_valpred = 0;  
 var js_adpcm_index = 0;    
@@ -114,7 +202,7 @@ var apiKeysItems = [
     "type": "input", 
     "messageKey": "GEMINI_API_KEY",
     "label": "Gemini API Key (Required)",
-    "description": geminiApiKey ? "✅ Status: Key is saved securely on your device." : "❌ Status: No key saved. App will not function.",
+    "description": geminiApiKey ? "✅ Status: Key saved locally in PebbleKit JS storage." : "❌ Status: No key saved. App will not function.",
     "attributes": {
       "type": "text",
       "autocorrect": "off",
@@ -137,7 +225,7 @@ if (hasSpeaker) {
     "type": "input", 
     "messageKey": "TTS_API_KEY",
     "label": "Google Cloud TTS API Key",
-    "description": ttsApiKey ? "✅ Status: Key saved securely." : "ℹ️ Status: No key saved.",
+    "description": ttsApiKey ? "✅ Status: Key saved locally." : "ℹ️ Status: No key saved.",
     "attributes": {
       "type": "text",
       "autocorrect": "off",
@@ -154,9 +242,10 @@ var advancedSettingsItems = [
     "messageKey": "GEMINI_MODEL",
     "label": "Gemini Model Version",
     "defaultValue": geminiModel,
-    "description": "Select the generation engine. Default is Gemini 3.5 Flash.",
+    "description": "Select the generation engine. Default is Gemini 3.8 Flash.",
     "options": [ 
-      { "label": "Gemini 3.7 Flash", "value": "gemini-3.7-flash" },
+      { "label": "Gemini 3.8 Flash (Default)", "value": "gemini-3.8-flash" },
+      { "label": "Gemini 3.7 Flash (Alias)", "value": "gemini-3.7-flash" },
       { "label": "Gemini 3.6 Flash", "value": "gemini-3.6-flash" },
       { "label": "Gemini 3.5 Flash", "value": "gemini-3.5-flash" },
       { "label": "Gemini 3.5 Flash-Lite", "value": "gemini-3.5-flash-lite" },
@@ -170,36 +259,35 @@ var advancedSettingsItems = [
 
 if (hasSpeaker) {
   advancedSettingsItems.push({
-    "type": "select", 
+    "type": "select",
     "messageKey": "TTS_VOICE",
-    "label": "Google TTS Voice",
+    "label": "Google TTS Voice (cost tiers)",
     "defaultValue": ttsVoice,
-    "description": "Select the assistant's voice profile. Default is Journey Female.",
-    "options": [ 
-      { "label": "Journey Female (Default)", "value": "en-US-Journey-F" },
-      { "label": "Journey Male", "value": "en-US-Journey-D" },
-      { "label": "Chirp 3 HD Female", "value": "en-US-Chirp3-HD-F" },
-      { "label": "Chirp 3 HD Male", "value": "en-US-Chirp3-HD-M" },
-      { "label": "Studio Female", "value": "en-US-Studio-O" },
-      { "label": "Studio Male", "value": "en-US-Studio-M" },
-      { "label": "Neural2 Female", "value": "en-US-Neural2-F" },
-      { "label": "Neural2 Male", "value": "en-US-Neural2-D" }
+    "description": "WaveNet $ = low cost; Neural2 $$ = medium; Chirp 3 HD $$$ = highest. Billing is based on generated characters, not a one-time fee.",
+    "options": [
+      { "label": "WaveNet F - Female ($, default)", "value": "en-US-Wavenet-F" },
+      { "label": "WaveNet C - Female ($)", "value": "en-US-Wavenet-C" },
+      { "label": "WaveNet D - Male ($)", "value": "en-US-Wavenet-D" },
+      { "label": "Neural2 C - Female ($$)", "value": "en-US-Neural2-C" },
+      { "label": "Neural2 F - Female ($$)", "value": "en-US-Neural2-F" },
+      { "label": "Neural2 D - Male ($$)", "value": "en-US-Neural2-D" },
+      { "label": "Chirp 3 HD Kore - Female ($$$)", "value": "en-US-Chirp3-HD-Kore" },
+      { "label": "Chirp 3 HD Aoede - Female ($$$)", "value": "en-US-Chirp3-HD-Aoede" },
+      { "label": "Chirp 3 HD Leda - Female ($$$)", "value": "en-US-Chirp3-HD-Leda" },
+      { "label": "Chirp 3 HD Zephyr - Female ($$$)", "value": "en-US-Chirp3-HD-Zephyr" },
+      { "label": "Chirp 3 HD Charon - Male ($$$)", "value": "en-US-Chirp3-HD-Charon" },
+      { "label": "Chirp 3 HD Puck - Male ($$$)", "value": "en-US-Chirp3-HD-Puck" }
     ]
+  });
+  advancedSettingsItems.push({
+    "type": "text",
+    "defaultValue": "Relative TTS cost per 1M characters after Google's monthly free allowance: WaveNet $ ($4); Neural2 $$ ($16); Chirp 3 HD $$$ ($30). Studio voices removed. Charges depend on usage and Google's current pricing."
+  });
+  advancedSettingsItems.push({
+    "type": "text",
+    "defaultValue": "Audio: 8 kHz PCM16 playback with 4-bit IMA-ADPCM streaming. The previous 16 kHz / 8-bit modes were not supported by the watch decoder."
   });
 
-  advancedSettingsItems.push({
-    "type": "select", 
-    "messageKey": "AUDIO_PROFILE",
-    "label": "Audio Stream Quality",
-    "defaultValue": audioProfile,
-    "description": "Note: 8kHz/16-bit is optimized for Pebble BLE bandwidth. Lowering the rate further to 8-bit will reduce delay but increase background noise.",
-    "options": [
-      { "label": "16kHz 16-bit (High Fidelity)", "value": "16k-16b" },
-      { "label": "16kHz 8-bit", "value": "16k-8b" },
-      { "label": "8kHz 16-bit (Best Stability/Default)", "value": "8k-16b" },
-      { "label": "8kHz 8-bit (Lowest Delay)", "value": "8k-8b" }
-    ]
-  });
 }
 
 var clayConfig = [
@@ -227,6 +315,15 @@ var clayConfig = [
   {
     "type": "section", 
     "items": advancedSettingsItems
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Conversation & Privacy" },
+      { "type": "text", "defaultValue": "The last three Q&A pairs are saved locally on this phone. Questions are sent to Google Gemini, and speech text to Google Cloud TTS. API keys are stored in PebbleKit local storage, not app-encrypted. Cloud API usage may incur charges." },
+      { "type": "toggle", "messageKey": "CLEAR_HISTORY", "label": "Clear Conversation History on Save",
+        "defaultValue": false, "description": "Clear prior questions and answers without removing API keys, voice, or settings." }
+    ]
   },
   {
     "type": "section", 
@@ -262,18 +359,18 @@ function customClay() {
     var ttsToggle = clayConfig.getItemByMessageKey('ENABLE_TTS');
     var ttsKey = clayConfig.getItemByMessageKey('TTS_API_KEY');
     var ttsVoice = clayConfig.getItemByMessageKey('TTS_VOICE');
-    var audioProfile = clayConfig.getItemByMessageKey('AUDIO_PROFILE');
+
 
     // Only process visibility if the components exist on this hardware profile
     if (ttsToggle) {
       if (ttsToggle.get()) {
         if (ttsKey) ttsKey.show();
         if (ttsVoice) ttsVoice.show();
-        if (audioProfile) audioProfile.show();
+
       } else {
         if (ttsKey) ttsKey.hide(); // Hides the fields, but preserves their saved text!
         if (ttsVoice) ttsVoice.hide();
-        if (audioProfile) audioProfile.hide();
+
       }
     }
   }
@@ -344,8 +441,9 @@ function encodeADPCM(pcm16) {
 }
 
 function lowPassFilter(samples) {
-  var filtered = []; 
-  filtered[0] = samples[0]; 
+  if (samples.length < 3) return samples.slice();
+  var filtered = [];
+  filtered[0] = samples[0];
   filtered[1] = samples[1]; 
   for (var i = 2; i < samples.length; i++) {
     filtered[i] = (samples[i] + samples[i - 1] + samples[i - 2]) / 3;
@@ -363,8 +461,16 @@ Pebble.addEventListener('showConfiguration', function() {
 
 Pebble.addEventListener('webviewclosed', function(e) {
   if (e && !e.response) return; 
-  var settings = JSON.parse(decodeURIComponent(e.response)); 
+  var settings;
+  try { settings = JSON.parse(decodeURIComponent(e.response)); }
+  catch (error) { console.log('Invalid configuration response', error); return; } 
 
+  if (settings.CLEAR_HISTORY && (settings.CLEAR_HISTORY.value === true || settings.CLEAR_HISTORY.value === 'true')) {
+    cancelCurrentAudio();
+    conversationHistory = [];
+    localStorage.setItem('CHAT_HISTORY', '[]');
+    console.log('Conversation history cleared');
+  }
   if (settings.CUSTOM_PERSONA) {
     customPersona = settings.CUSTOM_PERSONA.value;
     localStorage.setItem("CUSTOM_PERSONA", customPersona); 
@@ -380,25 +486,23 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem("ENABLE_TTS", enableTts ? "true" : "false"); 
   }
 
-  if (settings.TTS_API_KEY !== undefined) {
+  // An intentionally blank Clay field must not erase a previously saved key.
+  if (settings.TTS_API_KEY && settings.TTS_API_KEY.value) {
     ttsApiKey = settings.TTS_API_KEY.value;
-    localStorage.setItem("TTS_API_KEY", ttsApiKey); // Saves the hidden value if toggled off!
+    localStorage.setItem("TTS_API_KEY", ttsApiKey);
   }
 
   if (settings.GEMINI_MODEL) {
-    geminiModel = settings.GEMINI_MODEL.value || "gemini-3.5-flash"; 
+    geminiModel = settings.GEMINI_MODEL.value || "gemini-3.8-flash"; 
     localStorage.setItem("GEMINI_MODEL", geminiModel); 
   }
 
   if (settings.TTS_VOICE) {
-    ttsVoice = settings.TTS_VOICE.value || "en-US-Journey-F"; 
+    ttsVoice = normalizeTtsVoice(settings.TTS_VOICE.value || "en-US-Wavenet-F"); 
     localStorage.setItem("TTS_VOICE", ttsVoice); 
   }
 
-  if (settings.AUDIO_PROFILE) {
-    audioProfile = settings.AUDIO_PROFILE.value || "8k-16b";
-    localStorage.setItem("AUDIO_PROFILE", audioProfile); 
-  }
+
 
   if (settings.FONT_SIZE) {
     fontSize = settings.FONT_SIZE.value;
@@ -416,10 +520,20 @@ Pebble.addEventListener('ready', function() {
 Pebble.addEventListener('appmessage', function(e) {
   var dict = e.payload; 
 
+  if (dict.COMMAND === 'AUDIO_ACK' || dict.COMMAND === 'AUDIO_WAIT') {
+    handleAudioAck(dict);
+    return;
+  }
+  if (dict.COMMAND === 'AUDIO_CANCEL') {
+    cancelCurrentAudio();
+    return;
+  }
+
   if (dict.COMMAND === 'DICTATION') {
     if (!geminiApiKey) geminiApiKey = localStorage.getItem("GEMINI_API_KEY") || "";
     if (ttsApiKey === null) ttsApiKey = localStorage.getItem("TTS_API_KEY") || "";
-    enableTts = localStorage.getItem("ENABLE_TTS") === "true";
+    var savedToggle = localStorage.getItem("ENABLE_TTS");
+    if (savedToggle === "true" || savedToggle === "false") enableTts = savedToggle === "true";
 
     // Strictly validate ONLY the Gemini API Key. TTS key is optional.
     if (!geminiApiKey) {
@@ -452,6 +566,9 @@ function sendErrorToWatch(msg) {
 // =========================================================================
 
 function fetchGeminiResponse(prompt, skipAudio) {
+  cancelCurrentAudio();
+  var generation = requestGeneration;
+  var streamId = nextStreamId = ((nextStreamId + 1) & 0x7fffffff) || 1;
   sentenceQueue = [];
   readyAudioQueue = [];
   isFetchingTTS = false;
@@ -466,169 +583,303 @@ function fetchGeminiResponse(prompt, skipAudio) {
     systemText += "\nUser's custom instructions: " + customPersona; 
   }
 
-  if (conversationHistory.length > 6) {
-    var excess = conversationHistory.length - 6;
-    if (conversationHistory[excess].role === 'model') { excess++; }
-    conversationHistory = conversationHistory.slice(excess);
-  }
-
-  conversationHistory.push({ role: "user", parts: [{ text: prompt }] }); 
+  var historyForRequest = trimConversationHistory(conversationHistory).slice();
+  historyForRequest.push({ role: "user", parts: [{ text: prompt }] }); 
 
   // DYNAMIC URL ROUTING
   var url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
 
-  fetch(url, {
+  requestJsonWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: systemText }] },
-      contents: conversationHistory 
+      contents: historyForRequest
     })
-  })
-  .then(function(response) {
-    return response.json(); 
-  })
+  }, GEMINI_TIMEOUT_MS)
   .then(function(data) {
+    if (generation !== requestGeneration) return;
     if (data.candidates && data.candidates.length > 0) {
-      var replyText = data.candidates[0].content.parts[0].text; 
+      var parts = data.candidates[0].content && data.candidates[0].content.parts || [];
+      var replyText = parts.map(function(part) { return part.text || ''; }).join(' ').trim();
+      if (!replyText) {
+        sendErrorToWatch('Gemini returned no readable text.');
+        return;
+      } 
       
-      conversationHistory.push({ role: "model", parts: [{ text: replyText }] }); 
+      conversationHistory = trimConversationHistory(historyForRequest.concat([{ role: "model", parts: [{ text: replyText }] }])); 
       localStorage.setItem("CHAT_HISTORY", JSON.stringify(conversationHistory));  
 
-      // Multiplex the command so the watch handles audio stream profiles dynamically
-      var cmd = 'TEXT_RESPONSE_NO_AUDIO';
-      if (!skipAudio) {
-        cmd = 'TEXT_RESPONSE_16_16';
-        if (audioProfile === "16k-8b") cmd = 'TEXT_RESPONSE_16_8';
-        else if (audioProfile === "8k-16b") cmd = 'TEXT_RESPONSE_8_16';
-        else if (audioProfile === "8k-8b") cmd = 'TEXT_RESPONSE_8_8';
-      }
+      var cmd = skipAudio ? 'TEXT_RESPONSE_NO_AUDIO' : 'TEXT_RESPONSE_8_16';
 
-      Pebble.sendAppMessage({ 'COMMAND': cmd, 'TEXT': replyText.substring(0, 2048) }); 
-
-      if (!skipAudio) {
-        var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText]; 
-        sentenceQueue = rawSentences.map(function(s) { 
-          return s.trim(); 
-        }).filter(function(s) { 
-          return s.length > 0; 
-        });
-        startTTSFetchLoop(); 
+      // UTF-8-aware limit: watch inbox is only 1024 bytes including tuple overhead.
+      var displayText = '', bytes = 0;
+      for (var i = 0; i < replyText.length; i++) {
+        var c = replyText.charCodeAt(i), size = c < 128 ? 1 : (c < 2048 ? 2 : 3);
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < replyText.length && replyText.charCodeAt(i + 1) >= 0xDC00 && replyText.charCodeAt(i + 1) <= 0xDFFF) {
+          if (bytes + 4 > 700) break;
+          displayText += replyText.substr(i, 2); bytes += 4; i++; continue;
+        }
+        if (bytes + size > 700) break;
+        displayText += replyText.charAt(i); bytes += size;
       }
+      // Start audio only once the watch has accepted its new answer/session.
+      var textPayload = { 'COMMAND': cmd, 'TEXT': displayText, 'STREAM_ID': streamId };
+      function startAnswer() {
+        if (generation !== requestGeneration || skipAudio) return;
+        var rawSentences = replyText.match(/[^.!?]+[.!?]*/g) || [replyText];
+        sentenceQueue = rawSentences.map(function(part) { return part.trim(); }).filter(function(part) { return part.length > 0; });
+        startTTSFetchLoop(generation, streamId);
+      }
+      Pebble.sendAppMessage(textPayload, startAnswer, function(error) {
+        if (generation !== requestGeneration) return;
+        console.log("Text delivery failed", error);
+        Pebble.sendAppMessage(textPayload, startAnswer, function() { console.log("Text retry failed"); });
+      });
 
     } else if (data.error && data.error.message) {
-      conversationHistory.pop(); 
-      sendErrorToWatch("Gemini Err: " + data.error.message.substring(0, 60));
+      // Failed requests do not modify the committed conversation history. 
+      sendErrorToWatch(apiErrorMessage(data.error, 'Gemini'));
     } else {
-      conversationHistory.pop();
-      sendErrorToWatch("Empty Gemini response.");
+      sendErrorToWatch("Gemini returned no answer.");
     }
   })
-  .catch(function() {
-    conversationHistory.pop();
-    sendErrorToWatch("Network error.");
+  .catch(function(error) {
+    if (generation !== requestGeneration) return;
+    sendErrorToWatch(apiErrorMessage(error, 'Gemini'));
   });
 }
 
 // =========================================================================
-// SECTION 12: TEXT-TO-SPEECH INTERFACE PIPELINE
+// SECTION 12: AUDIO PREPARATION (8-kHz WAV PCM16 -> IMA ADPCM)
 // =========================================================================
 
-function startTTSFetchLoop() {
-  if (isFetchingTTS || sentenceQueue.length === 0) return; 
-  isFetchingTTS = true; 
-
-  var sentence = sentenceQueue.shift(); 
-  var url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + ttsApiKey;
-
-  var is16kHz = audioProfile.indexOf("16k") === 0;
-
-  fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      input: { text: sentence },
-      voice: { languageCode: 'en-US', name: ttsVoice }, 
-      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: is16kHz ? 16000 : 8000, speakingRate: 0.92 } 
-    })
-  })
-  .then(function(response) {
-    return response.json();
-  })
-  .then(function(data) {
-    if (data.audioContent) {
-      var decoded = atob(data.audioContent); 
-      var pcm16 = []; 
-
-      for (var i = 44; i < decoded.length; i += 2) {
-        var low = decoded.charCodeAt(i);
-        var high = decoded.charCodeAt(i + 1);
-        var sample16 = (high << 8) | low; 
-        if (sample16 > 32767) { sample16 -= 65536; } 
-        pcm16.push(sample16);
-      }
-
-      pcm16 = lowPassFilter(pcm16);     
-      var adpcmBytes = encodeADPCM(pcm16); 
-      
-      readyAudioQueue.push(adpcmBytes); 
-    }
-    
-    isFetchingTTS = false; 
-    
-    if (!isSendingBLE) {
-        startBLESendLoop(); 
-    }
-    
-    startTTSFetchLoop(); 
-  })
-  .catch(function(err) {
-    console.log('TTS Error', err);
-    isFetchingTTS = false;
-    startTTSFetchLoop();
-  });
+function cancelCurrentAudio() {
+  requestGeneration++;
+  if (activeTransfer && activeTransfer.timer) clearTimeout(activeTransfer.timer);
+  activeTransfer = null;
+  streamEndSent = false;
+  currentAudioData = null;
+  currentAudioCursor = 0;
+  currentAudioSeq = 0;
+  lastAckTime = 0;
+  sentenceQueue = [];
+  readyAudioQueue = [];
+  isFetchingTTS = false;
+  isSendingBLE = false;
+  js_adpcm_valpred = 0;
+  js_adpcm_index = 0;
 }
 
-// =========================================================================
-// SECTION 13: BLUETOOTH PACKET DISPATCH ENGINE
-// =========================================================================
-
-function startBLESendLoop() {
-  if (isSendingBLE) return; 
-  if (readyAudioQueue.length === 0) return; 
-  
-  isSendingBLE = true; 
-  var adpcmBytes = readyAudioQueue.shift(); 
-  var cursor = 0; 
-
-  function sendNextChunk() {
-    var previousCursor = cursor; 
-    var chunk = [];              
-    var chunkSize = 700;         
-
-    for (var i = 0; i < chunkSize && cursor < adpcmBytes.length; i++, cursor++) {
-      chunk.push(adpcmBytes[cursor]); 
+function pcmFromWav(base64) {
+  var wav = atob(base64);
+  if (wav.length < 44 || wav.substr(0, 4) !== 'RIFF' || wav.substr(8, 4) !== 'WAVE') throw Error('Invalid WAV');
+  function u16(p) { return wav.charCodeAt(p) | (wav.charCodeAt(p + 1) << 8); }
+  function u32(p) { return (wav.charCodeAt(p) | (wav.charCodeAt(p + 1) << 8) | (wav.charCodeAt(p + 2) << 16) | (wav.charCodeAt(p + 3) << 24)) >>> 0; }
+  var offset = 12, channels = 0, sampleRate = 0, bits = 0, format = 0, dataOffset = -1, dataLength = 0;
+  while (offset + 8 <= wav.length) {
+    var type = wav.substr(offset, 4), size = u32(offset + 4);
+    var end = offset + 8 + size;
+    if (end > wav.length) throw Error('Truncated WAV');
+    if (type === 'fmt ') {
+      if (size < 16) throw Error('Invalid WAV fmt');
+      format = u16(offset + 8); channels = u16(offset + 10);
+      sampleRate = u32(offset + 12); bits = u16(offset + 22);
+    } else if (type === 'data') {
+      dataOffset = offset + 8; dataLength = size;
+      break;
     }
-
-    if (chunk.length > 0) {
-      Pebble.sendAppMessage(
-        { 'COMMAND': 'AUDIO_CHUNK', 'CHUNK': chunk },
-        function success() { setTimeout(sendNextChunk, 60); }, 
-        function failure() { cursor = previousCursor; setTimeout(sendNextChunk, 200); } 
-      );
-    } else {
-      Pebble.sendAppMessage(
-        { 'COMMAND': 'AUDIO_SENTENCE_END' },
-        function() { 
-            isSendingBLE = false; 
-            setTimeout(startBLESendLoop, 120); 
-        },
-        function() { 
-            isSendingBLE = false;
-            setTimeout(startBLESendLoop, 300); 
-        }
-      );
-    }
+    offset = end + (size & 1);
   }
-  sendNextChunk(); 
+  if (format !== 1 || channels !== 1 || bits !== 16 || sampleRate !== 8000 || dataOffset < 0) {
+    throw Error('Unsupported WAV PCM format');
+  }
+  var result = [];
+  for (var p = dataOffset; p + 1 < dataOffset + dataLength; p += 2) {
+    var value = u16(p);
+    result.push(value > 32767 ? value - 65536 : value);
+  }
+  if (!result.length) throw Error('Empty WAV');
+  return result;
+}
+
+function isInvalidVoiceError(error) {
+  var message = String(error && error.message || error || '').toLowerCase();
+  return message.indexOf('voice') >= 0 &&
+    (message.indexOf('does not exist') >= 0 ||
+     message.indexOf('not found') >= 0 ||
+     message.indexOf('invalid') >= 0 ||
+     message.indexOf('misspelled') >= 0);
+}
+
+function startTTSFetchLoop(generation, streamId) {
+  if (generation !== requestGeneration || isFetchingTTS || !sentenceQueue.length) return;
+  isFetchingTTS = true;
+  var sentence = sentenceQueue.shift();
+  var url = 'https://texttospeech.googleapis.com/v1/text:synthesize?key=' + ttsApiKey;
+  var primaryVoice = normalizeTtsVoice(ttsVoice);
+  var fallbackVoice = "en-US-Wavenet-F";
+
+  function synthesize(voiceName, fallbackAttempt) {
+    var audioConfig = { audioEncoding: 'LINEAR16', sampleRateHertz: 8000 };
+    // Chirp 3 HD does not support the standard speakingRate audioConfig field.
+    if (voiceName.indexOf('-Chirp3-HD-') < 0) audioConfig.speakingRate = 0.92;
+    return requestJsonWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text: sentence },
+        voice: { languageCode: 'en-US', name: voiceName },
+        audioConfig: audioConfig
+      })
+    }, TTS_TIMEOUT_MS).then(function(data) {
+      if (generation !== requestGeneration) return;
+      if (!data.audioContent) {
+        var apiError = new Error(data.error && data.error.message || 'No TTS audio');
+        if (!fallbackAttempt && voiceName !== fallbackVoice && isInvalidVoiceError(apiError)) {
+          console.log('Invalid selected voice; retrying with WaveNet-F');
+          ttsVoice = fallbackVoice;
+          localStorage.setItem("TTS_VOICE", fallbackVoice);
+          return synthesize(fallbackVoice, true);
+        }
+        throw apiError;
+      }
+      var pcm = pcmFromWav(data.audioContent);
+      if (generation !== requestGeneration) return;
+      readyAudioQueue.push(encodeADPCM(lowPassFilter(pcm)));
+      isFetchingTTS = false;
+      if (!isSendingBLE) startBLESendLoop(generation, streamId);
+      startTTSFetchLoop(generation, streamId);
+      maybeFinishAudioStream(generation, streamId);
+    });
+  }
+
+  synthesize(primaryVoice, false).catch(function(error) {
+    if (generation !== requestGeneration) return;
+    isFetchingTTS = false;
+    console.log('TTS failed:', apiErrorMessage(error, 'TTS'));
+    // Stop speech, but leave the successfully displayed answer intact.
+    cancelCurrentAudio();
+    Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:streamId });
+  });
+}
+
+// =========================================================================
+// SECTION 13: STOP-AND-WAIT AUDIO DELIVERY WITH WATCH-LEVEL ACKNOWLEDGMENTS
+// =========================================================================
+
+// The watch reports bytes currently free in its playback ring. Transport
+// success alone does not acknowledge audio reception; only AUDIO_ACK does.
+function sendPendingPacket(transfer) {
+  if (transfer.generation !== requestGeneration || activeTransfer !== transfer) return;
+  if (transfer.timer) clearTimeout(transfer.timer);
+  transfer.attempts++;
+  if (transfer.attempts > MAX_BLE_RETRIES) {
+    console.log('Audio stopped: retry limit reached at packet ' + transfer.seq);
+    cancelCurrentAudio();
+    Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:transfer.streamId });
+    return;
+  }
+  var payload = {
+    COMMAND: transfer.final ? 'AUDIO_STREAM_END' : (transfer.end ? 'AUDIO_SENTENCE_END' : 'AUDIO_CHUNK'),
+    STREAM_ID: transfer.streamId,
+    SEQ: transfer.seq
+  };
+  if (!transfer.end && !transfer.final) {
+    payload.CHUNK = transfer.chunk;
+    payload.SENTENCE_TOTAL = transfer.total;
+    payload.BUFFER_HINT = Math.round(rateBytesPerSecond);
+  }
+  Pebble.sendAppMessage(payload, function() {}, function(error) {
+    if (transfer.generation !== requestGeneration || activeTransfer !== transfer) return;
+    console.log('Transport retry', error);
+  });
+  transfer.timer = setTimeout(function() { sendPendingPacket(transfer); }, ACK_TIMEOUT_MS);
+}
+
+function handleAudioAck(dict) {
+  var t = activeTransfer;
+  if (!t || t.generation !== requestGeneration) return;
+  if (Number(dict.STREAM_ID) !== t.streamId || Number(dict.SEQ) !== t.seq) return;
+  if (t.timer) { clearTimeout(t.timer); t.timer = null; }
+  if (dict.COMMAND === 'AUDIO_WAIT') {
+    // Bound a hardware or connection fault that never frees its ring buffer.
+    t.waits = (t.waits || 0) + 1;
+    if (t.waits > 75) {
+      console.log('Audio buffer did not drain');
+      cancelCurrentAudio();
+      Pebble.sendAppMessage({ COMMAND:'AUDIO_ERROR', STREAM_ID:t.streamId });
+      return;
+    }
+    t.attempts = 0;
+    t.timer = setTimeout(function() { sendPendingPacket(t); }, 180);
+    return;
+  }
+  var now = Date.now();
+  if (lastAckTime && !t.end && !t.final && t.attempts === 1) {
+    var measured = t.chunk.length * 1000 / Math.max(30, now - lastAckTime);
+    rateBytesPerSecond = Math.max(1000, Math.min(12000, 0.8 * rateBytesPerSecond + 0.2 * measured));
+  }
+  lastAckTime = now;
+  activeTransfer = null;
+  if (t.final) {
+    currentAudioSeq++;
+    streamEndSent = true;
+    isSendingBLE = false;
+  } else if (t.end) {
+    currentAudioSeq++;
+    isSendingBLE = false;
+    startBLESendLoop(t.generation, t.streamId);
+  } else {
+    currentAudioCursor += t.chunk.length;
+    currentAudioSeq++;
+    dispatchNextAudio(t.generation, t.streamId);
+  }
+}
+
+var currentAudioData = null;
+var currentAudioCursor = 0;
+var currentAudioSeq = 0;
+
+function maybeFinishAudioStream(generation, streamId) {
+  if (generation !== requestGeneration || streamEndSent || activeTransfer ||
+      isSendingBLE || isFetchingTTS || sentenceQueue.length || readyAudioQueue.length) return;
+  // Explicit final marker: a sentence end is NOT the end of the response.
+  // Keep the speaker active while synthesizing/streaming later sentences.
+  isSendingBLE = true;
+  activeTransfer = {
+    generation: generation, streamId: streamId,
+    seq: currentAudioSeq, chunk: null, end: false, final: true,
+    attempts: 0, timer: null
+  };
+  sendPendingPacket(activeTransfer);
+}
+
+function startBLESendLoop(generation, streamId) {
+  if (generation !== requestGeneration || isSendingBLE) return;
+  if (!readyAudioQueue.length) {
+    maybeFinishAudioStream(generation, streamId);
+    return;
+  }
+  isSendingBLE = true;
+  lastAckTime = 0; // Do not mistake a gap between TTS sentences for slow BLE.
+  currentAudioData = readyAudioQueue.shift();
+  currentAudioCursor = 0;
+  dispatchNextAudio(generation, streamId);
+}
+
+function dispatchNextAudio(generation, streamId) {
+  if (generation !== requestGeneration || activeTransfer || !isSendingBLE) return;
+  var remaining = currentAudioData.length - currentAudioCursor;
+  var isEnd = remaining <= 0;
+  var chunk = isEnd ? null : currentAudioData.slice(currentAudioCursor, currentAudioCursor + AUDIO_PACKET_BYTES);
+  activeTransfer = {
+    generation: generation, streamId: streamId,
+    seq: currentAudioSeq, chunk: chunk, end: isEnd, final: false, total: currentAudioData.length,
+    attempts: 0, timer: null
+  };
+  // DATA packets tell the watch this sentence's total bytes; it can avoid
+  // starting a short sentence until every byte has arrived.
+  if (!isEnd) activeTransfer.total = currentAudioData.length;
+  sendPendingPacket(activeTransfer);
 }
